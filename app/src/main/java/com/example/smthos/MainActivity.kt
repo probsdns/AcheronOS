@@ -54,7 +54,7 @@ import kotlin.math.atan2
 import kotlin.random.Random
 
 private val SMTHOS_VERSION = BuildConfig.SMTHOS_VERSION
-private const val PREFS_NAME = "smthos_settings"
+private const val PREFS_NAME = "acheron_settings"
 private const val PREF_WALLPAPER = "wallpaper_uri"
 private const val PREF_TEXT_COLOR = "text_color"
 
@@ -828,8 +828,7 @@ private fun SmthOS() {
 
     val startupOutput = remember {
         listOf(
-            "Type help for all commands and their purpose :D",
-            "",
+            "Type help for all commands",
             """
                   \         /
                    \       /
@@ -1176,15 +1175,19 @@ private fun SmthOS() {
                 .imePadding()
                 .padding(20.dp)
         ) {
+
+
             Text(
-                text = "smthOS",
+                text = "AcheronOS App Launcher",
                 color = textColor,
-                style = MaterialTheme.typography.headlineMedium,
+                fontSize = 20.sp,
                 fontFamily = FontFamily.Monospace
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
             Text(
-                text = "Terminal Launcher · $SMTHOS_VERSION | Developed by probsdns",
+                text = "App launcher | $SMTHOS_VERSION | Developed by probsdns (RS)",
                 color = textColor,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
@@ -1234,7 +1237,7 @@ private fun SmthOS() {
 
                 placeholder = {
                     Text(
-                        "Enter command...",
+                        " Enter command",
                         color = textColor.copy(alpha = 0.8f)
                     )
                 },
