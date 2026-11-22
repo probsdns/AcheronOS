@@ -365,7 +365,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Read EXIF orientation before decoding the image.
 private fun wallpaperMatrix(
     context: Context,
     uri: Uri
@@ -998,8 +997,7 @@ private fun AcheronOS() {
             lines.ifEmpty { "No hidden apps detected." }
         )
     }
-
-
+    
     fun runCommand() {
         val command = input.trim()
         if (command.isEmpty()) return
@@ -1007,9 +1005,6 @@ private fun AcheronOS() {
         input = ""
         val lower = command.lowercase()
         val query = normalize(command)
-
-        // Hidden app management commands
-        // These commands are intentionally excluded from help.
 
         val managementAction = lower.substringBefore(" ")
         val managementLocation =
@@ -1100,25 +1095,6 @@ private fun AcheronOS() {
             return
         }
 
-        if (lower == "happs") {
-            printLine("$managementLocation > $command")
-
-            val hiddenNames = directory.hidden.values
-                .map { it.label }
-                .distinct()
-                .sorted()
-
-            if (hiddenNames.isEmpty()) {
-                printLine("No hidden apps detected.")
-            } else {
-                printLine(
-                    hiddenNames.joinToString("\n")
-                )
-            }
-
-            return
-        }
-
         val commands = listOf(
             "back",
             "clear",
@@ -1134,7 +1110,6 @@ private fun AcheronOS() {
             "control"
         )
 
-        // Special commands retain their original behaviour.
         if (lower == "/" || lower == "back") {
             inHiddenFolder = false
             output = startupOutput
@@ -1177,7 +1152,6 @@ private fun AcheronOS() {
         val availableApps = aliases.values
             .distinctBy { appKey(it.app) }
 
-        // An exact command always remains usable.
         val exactCommand = commands.firstOrNull {
             normalize(it) == query
         }
@@ -1446,7 +1420,7 @@ private fun AcheronOS() {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "App launcher | $ACHERONOS_VERSION | Developed by probsdns (RS)",
+                text = "App launcher | $ACHERONOS_VERSION | Developed by probsdns",
                 color = textColor,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
