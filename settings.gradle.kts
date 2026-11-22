@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AcheronOS App Launcher"
+rootProject.name = "AcheronOS"
 include(":app")

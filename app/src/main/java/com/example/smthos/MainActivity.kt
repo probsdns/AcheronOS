@@ -1,4 +1,4 @@
-package com.example.smthos
+package com.example.acheronos
 
 import android.content.Context
 import android.content.Intent
@@ -53,7 +53,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.atan2
 import kotlin.random.Random
 
-private val SMTHOS_VERSION = BuildConfig.SMTHOS_VERSION
+private val ACHERONOS_VERSION = BuildConfig.ACHERONOS_VERSION
 private const val PREFS_NAME = "acheron_settings"
 private const val PREF_WALLPAPER = "wallpaper_uri"
 private const val PREF_TEXT_COLOR = "text_color"
@@ -359,7 +359,7 @@ class MainActivity : ComponentActivity() {
                     onPrimary = TerminalBlack
                 )
             ) {
-                SmthOS()
+                AcheronOS()
             }
         }
     }
@@ -777,7 +777,7 @@ private fun TextColorPicker(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SmthOS() {
+private fun AcheronOS() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -1437,16 +1437,16 @@ private fun SmthOS() {
 
 
             Text(
-                text = "AcheronOS App Launcher",
+                text = "AcheronOS",
                 color = textColor,
-                fontSize = 20.sp,
+                fontSize = 25.sp,
                 fontFamily = FontFamily.Monospace
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "App launcher | $SMTHOS_VERSION | Developed by probsdns (RS)",
+                text = "App launcher | $ACHERONOS_VERSION | Developed by probsdns (RS)",
                 color = textColor,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
