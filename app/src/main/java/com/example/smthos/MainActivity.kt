@@ -1,1532 +1,785 @@
 package com.example.acheronos
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Matrix
-import android.net.Uri
+import android.content.pm.ResolveInfo
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
+import android.os.SystemClock
+import android.text.InputType
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import android.widget.EditText
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
-import androidx.exifinterface.media.ExifInterface
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlin.math.atan2
-import kotlin.random.Random
-
-private val ACHERONOS_VERSION = BuildConfig.ACHERONOS_VERSION
-private const val PREFS_NAME = "acheron_settings"
-private const val PREF_WALLPAPER = "wallpaper_uri"
-private const val PREF_TEXT_COLOR = "text_color"
-private const val PREF_HIDDEN_PACKAGES = "hidden_packages"
-
-private val TerminalBlack = Color.Black
-private val DefaultTextColor = Color.White
-
-private val hiddenApps = listOf(
-    "ChatGPT",
-    "Discord",
-    "Google Chat",
-    "Messages",
-    "TikTok",
-    "YouTube"
-)
-
-private val knownPackages = mapOf(
-    "ChatGPT" to "com.openai.chatgpt",
-    "Discord" to "com.discord",
-    "Google Chat" to "com.google.android.apps.dynamite",
-    "Messages" to "com.google.android.apps.messaging",
-    "TikTok" to "com.zhiliaoapp.musically",
-    "YouTube" to "com.google.android.youtube"
-)
-
-private val preferredNames = mapOf(
-    "Google Chat" to "Chat",
-    "Google Maps" to "Maps",
-    "Google Drive" to "Drive",
-    "Google Play Store" to "Play Store",
-    "Google Classroom" to "Classroom",
-    "Samsung Notes" to "Notes",
-    "Samsung Health" to "Health",
-    "Galaxy Store" to "Store"
-)
-
-private data class PhoneApp(
-    val name: String,
-    val packageName: String,
-    val activityName: String
-)
-
-private data class AppShortcut(
-    val label: String,
-    val app: PhoneApp
-)
-
-private data class AppDirectory(
-    val visible: Map<String, AppShortcut>,
-    val hidden: Map<String, AppShortcut>
-)
-
-private fun normalize(value: String): String =
-    value.lowercase().filter { it.isLetterOrDigit() }
-
-private fun appKey(app: PhoneApp): String =
-    "${app.packageName}/${app.activityName}"
-
-private fun displayName(app: PhoneApp): String =
-    preferredNames[app.name] ?: when (app.packageName) {
-        "com.google.android.apps.classroom" -> "Classroom"
-        else -> app.name
-    }
-
-private fun installedApps(context: Context): List<PhoneApp> {
-    val intent = Intent(Intent.ACTION_MAIN).apply {
-        addCategory(Intent.CATEGORY_LAUNCHER)
-    }
-
-    val manager = context.packageManager
-
-    @Suppress("DEPRECATION")
-    val results = manager.queryIntentActivities(intent, 0)
-
-    return results.mapNotNull { result ->
-        val activity = result.activityInfo
-            ?: return@mapNotNull null
-
-        PhoneApp(
-            name = result.loadLabel(manager).toString(),
-            packageName = activity.packageName,
-            activityName = activity.name
-        )
-    }.distinctBy {
-        appKey(it)
-    }.sortedWith(
-        compareBy<PhoneApp>(
-            { it.name.lowercase() },
-            { appKey(it) }
-        )
-    )
-}
-
-private fun resolveHiddenApp(
-    label: String,
-    apps: List<PhoneApp>
-): PhoneApp? {
-    val packageName = knownPackages[label]
-
-    if (packageName != null) {
-        apps.firstOrNull {
-            it.packageName == packageName
-        }?.let { return it }
-    }
-
-    val expectedName = normalize(
-        preferredNames[label] ?: label
-    )
-
-    return apps.firstOrNull {
-        normalize(it.name) == expectedName
-    } ?: apps.firstOrNull {
-        normalize(it.name) == normalize(label)
-    }
-}
-
-private fun generateAliases(
-    shortcuts: List<AppShortcut>
-): Map<String, AppShortcut> {
-    val result = linkedMapOf<String, AppShortcut>()
-
-    val ordered = shortcuts.sortedWith(
-        compareBy<AppShortcut>(
-            { normalize(it.label).length },
-            { normalize(it.label) },
-            { appKey(it.app) }
-        )
-    )
-
-    for (shortcut in ordered) {
-        val name = normalize(shortcut.label)
-        if (name.isEmpty()) continue
-
-        val minimum = minOf(2, name.length)
-        var chosen: String? = null
-
-        for (length in minimum..name.length) {
-            val candidate = name.take(length)
-
-            val conflicts = ordered.any { other ->
-                other != shortcut &&
-                        normalize(other.label).startsWith(candidate)
-            }
-
-            if (!conflicts && candidate !in result) {
-                chosen = candidate
-                break
-            }
-        }
-
-        if (chosen == null) {
-            val packagePart = normalize(
-                shortcut.app.packageName.substringAfterLast(".")
-            )
-
-            val activityPart = normalize(
-                shortcut.app.activityName.substringAfterLast(".")
-            )
-
-            val base = name + packagePart
-
-            chosen = listOf(
-                name,
-                base,
-                base + activityPart,
-                name + normalize(shortcut.app.packageName)
-            ).firstOrNull {
-                it.isNotEmpty() && it !in result
-            }
-
-            if (chosen == null) {
-                var number = 2
-                var candidate = base + number
-
-                while (candidate in result) {
-                    number++
-                    candidate = base + number
-                }
-
-                chosen = candidate
-            }
-        }
-
-        result[chosen] = shortcut
-    }
-
-    return result
-}
-
-private fun resolveShortcut(
-    requested: String,
-    aliases: Map<String, AppShortcut>
-): AppShortcut? {
-    val query = normalize(requested)
-    if (query.isEmpty()) return null
-
-    if (
-        query == "googleclassroom" ||
-        query == "classroom"
-    ) {
-        aliases.values.firstOrNull {
-            it.app.packageName ==
-                    "com.google.android.apps.classroom"
-        }?.let { return it }
-    }
-
-    aliases[query]?.let { return it }
-
-    val shortcuts = aliases.values.toList()
-
-    val exactMatches = shortcuts.filter {
-        normalize(it.label) == query
-    }
-
-    if (exactMatches.size == 1) {
-        return exactMatches.first()
-    }
-
-    if (query.length < 2) return null
-
-    val matching = shortcuts.filter {
-        normalize(it.label).startsWith(query)
-    }
-
-    return if (matching.size == 1) {
-        matching.first()
-    } else {
-        null
-    }
-}
-
-
-private fun buildDirectory(
-    context: Context,
-    apps: List<PhoneApp>,
-    hiddenPackages: Set<String>
-): AppDirectory {
-    val hiddenResolved = apps
-        .filter {
-            it.packageName in hiddenPackages &&
-                    it.packageName != context.packageName
-        }
-        .map {
-            AppShortcut(
-                label = displayName(it),
-                app = it
-            )
-        }
-        .distinctBy { appKey(it.app) }
-
-    val visibleApps = apps
-        .filter {
-            it.packageName !in hiddenPackages
-        }
-        .filter {
-            it.packageName != context.packageName
-        }
-        .map {
-            AppShortcut(
-                label = displayName(it),
-                app = it
-            )
-        }
-
-    return AppDirectory(
-        visible = generateAliases(visibleApps),
-        hidden = generateAliases(hiddenResolved)
-    )
-}
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : ComponentActivity() {
+
+    private var terminalInput: EditText? = null
+    private var terminalPrompt: TextView? = null
+    private var terminalScroll: ScrollView? = null
+
+    private var isResumed = false
+    private var launchingApp = false
+    private var inHiddenFolder = false
+
+    private val preferences by lazy {
+        getSharedPreferences(
+            "acheron_settings",
+            Context.MODE_PRIVATE
+        )
+    }
+
+    private var hiddenPackages = mutableSetOf<String>()
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        recreate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isResumed = true
+        launchingApp = false
+        showKeyboard()
+    }
+
+    override fun onPause() {
+        isResumed = false
+        super.onPause()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+
+        if (hasFocus) {
+            showKeyboard()
+        }
+    }
+
+    private fun showKeyboard() {
+        val input = terminalInput ?: return
+
+        input.postDelayed({
+            if (
+                isResumed &&
+                !launchingApp &&
+                hasWindowFocus() &&
+                input.isAttachedToWindow
+            ) {
+                if (!input.hasFocus()) {
+                    input.requestFocus()
+                }
+
+                WindowCompat.getInsetsController(
+                    window,
+                    input
+                ).show(WindowInsetsCompat.Type.ime())
+            }
+        }, 150)
+    }
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        WindowCompat.setDecorFitsSystemWindows(
-            window,
-            false
-        )
+        hiddenPackages = preferences.getStringSet(
+            "hidden_packages",
+            emptySet()
+        )?.toMutableSet() ?: mutableSetOf()
 
-        window.navigationBarColor =
-            android.graphics.Color.TRANSPARENT
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        window.navigationBarColor = Color.TRANSPARENT
+        window.statusBarColor = Color.TRANSPARENT
 
         WindowCompat.getInsetsController(
             window,
             window.decorView
-        ).isAppearanceLightNavigationBars = false
+        ).apply {
+            isAppearanceLightNavigationBars = false
+            isAppearanceLightStatusBars = false
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }
 
-        setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    background = TerminalBlack,
-                    surface = TerminalBlack,
-                    onBackground = DefaultTextColor,
-                    onSurface = DefaultTextColor,
-                    primary = DefaultTextColor,
-                    onPrimary = TerminalBlack
-                )
-            ) {
-                AcheronOS()
-            }
+        val shortestDimension = minOf(
+            resources.configuration.screenWidthDp,
+            resources.configuration.screenHeightDp
+        )
+
+        if (shortestDimension < 600) {
+            coverScreen()
+        } else {
+            innerScreen()
         }
     }
-}
 
-private fun wallpaperMatrix(
-    context: Context,
-    uri: Uri
-): Matrix {
-    val orientation = try {
-        context.contentResolver.openInputStream(uri)?.use {
-            ExifInterface(it).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
+    private fun coverScreen() {
+
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+        )
+
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
+
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Color.BLACK)
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            isFillViewport = true
+            overScrollMode = ScrollView.OVER_SCROLL_NEVER
+
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
-        } ?: ExifInterface.ORIENTATION_NORMAL
-    } catch (_: Exception) {
-        ExifInterface.ORIENTATION_NORMAL
-    }
-
-    return Matrix().apply {
-        when (orientation) {
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL ->
-                postScale(-1f, 1f)
-
-            ExifInterface.ORIENTATION_ROTATE_180 ->
-                postRotate(180f)
-
-            ExifInterface.ORIENTATION_FLIP_VERTICAL ->
-                postScale(1f, -1f)
-
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                postRotate(90f)
-                postScale(-1f, 1f)
-            }
-
-            ExifInterface.ORIENTATION_ROTATE_90 ->
-                postRotate(90f)
-
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                postRotate(-90f)
-                postScale(-1f, 1f)
-            }
-
-            ExifInterface.ORIENTATION_ROTATE_270 ->
-                postRotate(270f)
         }
-    }
-}
 
-// Load a reduced-resolution image and apply
-// the rotation/mirroring stored in EXIF metadata.
-private suspend fun loadWallpaper(
-    context: Context,
-    uri: Uri
-): androidx.compose.ui.graphics.ImageBitmap? =
-    withContext(Dispatchers.IO) {
-        try {
-            val resolver = context.contentResolver
-            val matrix = wallpaperMatrix(context, uri)
+        terminalScroll = scroll
 
-            val bounds = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val stats = TextView(this).apply {
+            text = getCoverStats()
+            setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            textSize = 15f
+            gravity = Gravity.TOP or Gravity.START
+            setPadding(0, 0, 0, 0)
+        }
+
+        val promptRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val prompt = TextView(this).apply {
+            text = "[Ranveer@ZFold8U ~] \$ "
+            setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            textSize = 15f
+            setPadding(0, 0, 0, 0)
+        }
+
+        terminalPrompt = prompt
+
+        val commandInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+
+            setSingleLine(true)
+            setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            textSize = 15f
+            this.background = null
+            setPadding(0, 0, 0, 0)
+
+            imeOptions = EditorInfo.IME_ACTION_DONE or
+                    EditorInfo.IME_FLAG_NO_EXTRACT_UI
+
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+
+            if (Build.VERSION.SDK_INT >= 29) {
+                textCursorDrawable?.setTint(Color.WHITE)
             }
+        }
 
-            resolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, bounds)
-            }
+        terminalInput = commandInput
 
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                return@withContext null
-            }
+        val output = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            textSize = 15f
+            setPadding(0, 0, 0, 0)
 
-            val maxDimension = 2048
-            var sampleSize = 1
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
 
-            while (
-                bounds.outWidth / sampleSize > maxDimension ||
-                bounds.outHeight / sampleSize > maxDimension
-            ) {
-                sampleSize *= 2
-            }
+        promptRow.addView(prompt)
+        promptRow.addView(commandInput)
 
-            val options = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
+        content.addView(stats)
+        content.addView(promptRow)
+        content.addView(output)
 
-            val decoded = resolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(
-                    it,
-                    null,
-                    options
-                )
-            } ?: return@withContext null
+        scroll.addView(content)
+        root.addView(scroll)
 
-            val corrected = if (matrix.isIdentity) {
-                decoded
-            } else {
-                try {
-                    Bitmap.createBitmap(
-                        decoded,
-                        0,
-                        0,
-                        decoded.width,
-                        decoded.height,
-                        matrix,
-                        true
-                    ).also {
-                        if (it !== decoded) {
-                            decoded.recycle()
+        prompt.setOnClickListener {
+            commandInput.requestFocus()
+            showKeyboard()
+        }
+
+        commandInput.setOnEditorActionListener { _, actionId, event ->
+
+            val enterPressed =
+                event?.keyCode == KeyEvent.KEYCODE_ENTER
+
+            val submit =
+                if (enterPressed) {
+                    event?.action == KeyEvent.ACTION_DOWN
+                } else {
+                    actionId == EditorInfo.IME_ACTION_DONE
+                }
+
+            if (submit) {
+                val command =
+                    commandInput.text.toString().trim()
+
+                if (command.isNotEmpty()) {
+                    output.text = runCommand(command)
+                    commandInput.text.clear()
+
+                    if (command.equals("back", ignoreCase = true)) {
+                        scroll.post {
+                            scroll.scrollTo(0, 0)
+                        }
+                    } else {
+                        scroll.post {
+                            scroll.smoothScrollTo(
+                                0,
+                                promptRow.top
+                            )
                         }
                     }
-                } catch (_: Exception) {
-                    decoded
-                }
-            }
-
-            corrected.asImageBitmap()
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-@Composable
-private fun BinaryNavigationDecoration(
-    textColor: Color
-) {
-    val density = LocalDensity.current
-
-    val navigationHeight =
-        WindowInsets.navigationBars
-            .asPaddingValues()
-            .calculateBottomPadding()
-
-    var binaryTick by remember {
-        mutableIntStateOf(0)
-    }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(180)
-            binaryTick++
-        }
-    }
-
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(navigationHeight),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        val reservedRight = 155.dp
-        val leftPadding = 16.dp
-
-        val digitWidth = with(density) {
-            20.sp.toDp() * 1.35f
-        }
-
-        val availableWidth =
-            (maxWidth - reservedRight - leftPadding)
-                .coerceAtLeast(0.dp)
-
-        val digitCount =
-            ((availableWidth.value / digitWidth.value)
-                .toInt() - 7)
-                .coerceAtLeast(0)
-
-        val binaryText = remember(
-            binaryTick,
-            digitCount
-        ) {
-            List(digitCount) {
-                if (Random.nextBoolean()) "1" else "0"
-            }.joinToString(" ")
-        }
-
-        Text(
-            text = binaryText,
-            modifier = Modifier
-                .padding(start = leftPadding)
-                .offset(x = 26.dp, y = 1.dp),
-            color = textColor,
-            fontSize = 20.sp,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            softWrap = false
-        )
-    }
-}
-
-@Composable
-private fun TextColorPicker(
-    initialColor: Color,
-    onApply: (Color) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val hsv = remember(initialColor) {
-        FloatArray(3).also {
-            android.graphics.Color.colorToHSV(
-                initialColor.toArgb(),
-                it
-            )
-        }
-    }
-
-    var hue by remember(initialColor) {
-        mutableFloatStateOf(hsv[0])
-    }
-
-    var saturation by remember(initialColor) {
-        mutableFloatStateOf(hsv[1])
-    }
-
-    var brightness by remember(initialColor) {
-        mutableFloatStateOf(hsv[2])
-    }
-
-    fun selectedColor(): Color =
-        Color(
-            android.graphics.Color.HSVToColor(
-                floatArrayOf(hue, saturation, brightness)
-            )
-        )
-
-    val wheelColors = remember {
-        listOf(
-            Color.Red,
-            Color.Yellow,
-            Color.Green,
-            Color.Cyan,
-            Color.Blue,
-            Color.Magenta,
-            Color.Red
-        )
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF171717),
-        titleContentColor = Color.White,
-        textContentColor = Color.White,
-        title = {
-            Text(
-                "Text colour",
-                fontFamily = FontFamily.Monospace
-            )
-        },
-        text = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement =
-                    Arrangement.spacedBy(12.dp)
-            ) {
-                Canvas(
-                    modifier = Modifier
-                        .size(220.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures { offset ->
-                                val center = Offset(
-                                    size.width / 2f,
-                                    size.height / 2f
-                                )
-
-                                val angle = atan2(
-                                    offset.y - center.y,
-                                    offset.x - center.x
-                                )
-
-                                hue = (
-                                        Math.toDegrees(angle.toDouble())
-                                            .toFloat() + 360f
-                                        ) % 360f
-                            }
-                        }
-                        .pointerInput(Unit) {
-                            detectDragGestures { change, _ ->
-                                val center = Offset(
-                                    size.width / 2f,
-                                    size.height / 2f
-                                )
-
-                                val angle = atan2(
-                                    change.position.y - center.y,
-                                    change.position.x - center.x
-                                )
-
-                                hue = (
-                                        Math.toDegrees(angle.toDouble())
-                                            .toFloat() + 360f
-                                        ) % 360f
-
-                                change.consume()
-                            }
-                        }
-                ) {
-                    val radius = size.minDimension / 2f
-
-                    drawCircle(
-                        brush = Brush.sweepGradient(wheelColors),
-                        radius = radius
-                    )
-
-                    drawCircle(
-                        color = Color(0xFF171717),
-                        radius = radius * 0.67f
-                    )
-
-                    drawCircle(
-                        color = selectedColor(),
-                        radius = radius * 0.51f
-                    )
-
-                    drawCircle(
-                        color = Color.White,
-                        radius = radius * 0.51f,
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-
-                    val angle = Math.toRadians(
-                        hue.toDouble()
-                    )
-
-                    val markerRadius = radius * 0.83f
-
-                    val markerCenter = Offset(
-                        center.x + (
-                                kotlin.math.cos(angle) *
-                                        markerRadius
-                                ).toFloat(),
-                        center.y + (
-                                kotlin.math.sin(angle) *
-                                        markerRadius
-                                ).toFloat()
-                    )
-
-                    drawCircle(
-                        color = Color.White,
-                        radius = 9.dp.toPx(),
-                        center = markerCenter
-                    )
-
-                    drawCircle(
-                        color = Color.Black,
-                        radius = 6.dp.toPx(),
-                        center = markerCenter
-                    )
                 }
 
-                Text(
-                    text = "Saturation",
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace
-                )
+                if (!launchingApp) {
+                    showKeyboard()
+                }
 
-                Slider(
-                    value = saturation,
-                    onValueChange = { saturation = it },
-                    valueRange = 0f..1f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = selectedColor(),
-                        activeTrackColor = selectedColor()
-                    )
-                )
-
-                Text(
-                    text = "Brightness",
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace
-                )
-
-                Slider(
-                    value = brightness,
-                    onValueChange = { brightness = it },
-                    valueRange = 0f..1f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = selectedColor(),
-                        activeTrackColor = selectedColor()
-                    )
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(42.dp)
-                        .background(selectedColor())
-                        .border(1.dp, Color.White)
-                )
-
-                Text(
-                    text = String.format(
-                        "#%06X",
-                        selectedColor().toArgb() and 0xFFFFFF
-                    ),
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace
-                )
+                true
+            } else {
+                enterPressed
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onApply(selectedColor()) }
+        }
+
+        var keyboardWasVisible = false
+
+        ViewCompat.setOnApplyWindowInsetsListener(
+            root
+        ) { view, insets ->
+
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                        WindowInsetsCompat.Type.displayCutout()
+            )
+
+            val ime = insets.getInsets(
+                WindowInsetsCompat.Type.ime()
+            )
+
+            val keyboardVisible = insets.isVisible(
+                WindowInsetsCompat.Type.ime()
+            )
+
+            val padding =
+                (16 * resources.displayMetrics.density).toInt()
+
+            view.setPadding(
+                bars.left + padding,
+                bars.top + padding,
+                bars.right + padding,
+                maxOf(bars.bottom, ime.bottom) + padding
+            )
+
+            if (
+                keyboardWasVisible &&
+                !keyboardVisible &&
+                !launchingApp &&
+                isResumed
             ) {
-                Text("Apply", color = Color.White)
+                showKeyboard()
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.White)
-            }
+
+            keyboardWasVisible = keyboardVisible
+
+            insets
         }
-    )
-}
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun AcheronOS() {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+        setContentView(root)
+        commandInput.requestFocus()
+        ViewCompat.requestApplyInsets(root)
+        showKeyboard()
+    }
 
-    val preferences = remember(context) {
-        context.getSharedPreferences(
-            PREFS_NAME,
-            Context.MODE_PRIVATE
+    private fun innerScreen() {
+
+        terminalInput = null
+        terminalPrompt = null
+        terminalScroll = null
+
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         )
+
+        WindowCompat.getInsetsController(
+            window,
+            window.decorView
+        ).hide(WindowInsetsCompat.Type.ime())
+
+        val background = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
+
+        setContentView(background)
     }
 
-    var wallpaperUri by remember {
-        mutableStateOf(
-            preferences.getString(PREF_WALLPAPER, null)
-        )
-    }
-
-    var textColor by remember {
-        mutableStateOf(
-            Color(
-                preferences.getInt(
-                    PREF_TEXT_COLOR,
-                    android.graphics.Color.WHITE
-                )
-            )
-        )
-    }
-
-    var showColorPicker by remember {
-        mutableStateOf(false)
-    }
-
-    var wallpaperImage by remember {
-        mutableStateOf<
-                androidx.compose.ui.graphics.ImageBitmap?
-                >(null)
-    }
-
-    LaunchedEffect(wallpaperUri) {
-        wallpaperImage = null
-
-        val savedUri = wallpaperUri
-        if (savedUri != null) {
-            wallpaperImage = loadWallpaper(
-                context,
-                Uri.parse(savedUri)
-            )
+    private fun normalize(value: String): String {
+        return value.lowercase().filter {
+            it.isLetterOrDigit()
         }
     }
 
-    val startupOutput = remember {
-        listOf(
-            "Type help for all commands",
-            """
-                  \         /
-                   \       /
-                .-----------.
-               /             \
-              |   o       o   |
-              |               |
-               \_____________/
-             .-----------------.
-          .--|                 |--.
-          |  |                 |  |
-          |  |                 |  |
-          |  |                 |  |
-          '--|                 |--'
-             '-----------------'
-                |   |   |   |
-                |   |   |   |
-                '---'   '---'
-            """.trimIndent()
-        )
+    private fun updatePrompt() {
+        val location = if (inHiddenFolder) "?" else "~"
+
+        terminalPrompt?.text =
+            "[Ranveer@ZFold8U $location] \$ "
     }
 
-    var output by remember {
-        mutableStateOf(startupOutput)
-    }
-
-    fun printLine(message: String) {
-        output = output + message
-    }
-
-    val wallpaperPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-
-                wallpaperUri = uri.toString()
-
-                preferences.edit()
-                    .putString(PREF_WALLPAPER, uri.toString())
-                    .apply()
-
-                printLine("Wallpaper updated.")
-            } catch (_: Exception) {
-                printLine("Unable to save wallpaper permission.")
-            }
-        }
-    }
-
-    var apps by remember {
-        mutableStateOf(installedApps(context))
-    }
-
-
-    val initialHiddenPackages = remember(context) {
-        if (preferences.contains(PREF_HIDDEN_PACKAGES)) {
-            preferences.getStringSet(
-                PREF_HIDDEN_PACKAGES,
-                emptySet()
-            )?.toSet() ?: emptySet()
-        } else {
-            hiddenApps.mapNotNull { label ->
-                knownPackages[label]
-                    ?: resolveHiddenApp(label, apps)?.packageName
-            }.toSet().also { defaults ->
-                preferences.edit()
-                    .putStringSet(PREF_HIDDEN_PACKAGES, defaults)
-                    .apply()
-            }
-        }
-    }
-
-    var hiddenPackages by remember {
-        mutableStateOf(initialHiddenPackages)
-    }
-
-    fun saveHiddenPackages(updated: Set<String>) {
-        hiddenPackages = updated.toSet()
-
+    private fun saveHiddenPackages() {
         preferences.edit()
-            .putStringSet(PREF_HIDDEN_PACKAGES, updated.toSet())
+            .putStringSet(
+                "hidden_packages",
+                hiddenPackages.toSet()
+            )
             .apply()
     }
 
-    val directory = remember(context, apps, hiddenPackages) {
-        buildDirectory(context, apps, hiddenPackages)
+    @Suppress("DEPRECATION")
+    private fun installedApps(): List<ResolveInfo> {
+
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        return packageManager
+            .queryIntentActivities(launcherIntent, 0)
+            .filter {
+                it.activityInfo.packageName != packageName
+            }
+            .distinctBy {
+                it.activityInfo.packageName + "/" +
+                        it.activityInfo.name
+            }
+            .sortedBy {
+                appName(it).lowercase()
+            }
     }
 
-    DisposableEffect(lifecycleOwner, context) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                apps = installedApps(context)
+    private fun appName(app: ResolveInfo): String {
+        return app.loadLabel(packageManager).toString()
+    }
+
+    private fun visibleApps(): List<ResolveInfo> {
+        return installedApps().filter {
+            it.activityInfo.packageName !in hiddenPackages
+        }
+    }
+
+    private fun hiddenApps(): List<ResolveInfo> {
+        return installedApps().filter {
+            it.activityInfo.packageName in hiddenPackages
+        }
+    }
+
+    private fun activeApps(): List<ResolveInfo> {
+        return if (inHiddenFolder) {
+            hiddenApps()
+        } else {
+            visibleApps()
+        }
+    }
+
+    private fun findMatches(
+        command: String,
+        apps: List<ResolveInfo>
+    ): List<ResolveInfo> {
+
+        val query = normalize(command)
+
+        if (query.length < 2) {
+            return emptyList()
+        }
+
+        val exactMatches = apps.filter {
+            normalize(appName(it)) == query
+        }
+
+        return if (exactMatches.isNotEmpty()) {
+            exactMatches
+        } else {
+            apps.filter {
+                normalize(appName(it)).startsWith(query)
+            }
+        }
+    }
+
+    private fun listApps(
+        apps: List<ResolveInfo>
+    ): String {
+
+        val names = apps.map {
+            appName(it)
+        }.distinct().sortedBy {
+            it.lowercase()
+        }
+
+        return if (names.isEmpty()) {
+            "No apps found."
+        } else {
+            names.joinToString("\n")
+        }
+    }
+
+    private fun moveApp(
+        requested: String,
+        hide: Boolean
+    ): String {
+
+        if (requested.isBlank()) {
+            return if (hide) {
+                "Usage: hide <app name>"
+            } else {
+                "Usage: unhide <app name>"
             }
         }
 
-        lifecycleOwner.lifecycle.addObserver(observer)
+        if (normalize(requested).length < 2) {
+            return "Enter at least 2 letters."
+        }
 
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+        val source = if (hide) {
+            visibleApps()
+        } else {
+            hiddenApps()
+        }
+
+        val matches = findMatches(
+            requested,
+            source
+        ).distinctBy {
+            it.activityInfo.packageName
+        }
+
+        if (matches.isEmpty()) {
+            return "App not found: $requested"
+        }
+
+        if (matches.size > 1) {
+            return "Provide more letters."
+        }
+
+        val app = matches.first()
+        val name = appName(app)
+        val appPackage = app.activityInfo.packageName
+
+        return if (hide) {
+
+            hiddenPackages.add(appPackage)
+            saveHiddenPackages()
+
+            "$name moved to ?"
+
+        } else {
+
+            hiddenPackages.remove(appPackage)
+            saveHiddenPackages()
+
+            "$name moved to home"
         }
     }
 
-    var input by remember {
-        mutableStateOf("")
+    private fun runCommand(command: String): String {
+
+        val cleaned = command.trim()
+        val lower = cleaned.lowercase()
+
+        if (lower == "hide" || lower.startsWith("hide ")) {
+            return moveApp(
+                cleaned.substringAfter(" ", "").trim(),
+                true
+            )
+        }
+
+        if (lower == "unhide" || lower.startsWith("unhide ")) {
+            return moveApp(
+                cleaned.substringAfter(" ", "").trim(),
+                false
+            )
+        }
+
+        return when (lower) {
+
+            "help" -> """
+                COMMANDS
+
+                help - List all commands
+                apps - List main directory apps
+                ? - Open ? folder
+                hide <app> - Move app to ?
+                unhide <app> - Move app to home
+                back - Return home and clear output
+                <app name> - Launch an app
+                <2+ letters> - Launch app by prefix
+            """.trimIndent()
+
+            "apps" -> {
+                listApps(visibleApps())
+            }
+
+            "?" -> {
+                inHiddenFolder = true
+                updatePrompt()
+
+                val apps = hiddenApps()
+
+                if (apps.isEmpty()) {
+                    "? folder is empty."
+                } else {
+                    listApps(apps)
+                }
+            }
+
+            "back" -> {
+                inHiddenFolder = false
+                updatePrompt()
+
+                terminalScroll?.post {
+                    terminalScroll?.scrollTo(0, 0)
+                }
+
+                ""
+            }
+
+            else -> launchApp(cleaned)
+        }
     }
 
-    var inHiddenFolder by remember {
-        mutableStateOf(false)
-    }
+    private fun launchApp(command: String): String {
 
-    val scrollState = rememberScrollState()
+        if (normalize(command).length < 2) {
+            return "Enter at least 2 letters."
+        }
 
-    LaunchedEffect(output) {
-        scrollState.animateScrollTo(
-            scrollState.maxValue
+        val matches = findMatches(
+            command,
+            activeApps()
         )
-    }
 
-    fun launchApp(shortcut: AppShortcut) {
-        val app = shortcut.app
+        if (matches.isEmpty()) {
+            return "App not found: $command"
+        }
 
-        try {
+        if (matches.size > 1) {
+            return "Provide more letters."
+        }
+
+        val app = matches.first()
+        val name = appName(app)
+
+        return try {
+
             val intent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_LAUNCHER)
 
                 setClassName(
-                    app.packageName,
-                    app.activityName
+                    app.activityInfo.packageName,
+                    app.activityInfo.name
                 )
 
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
 
-            context.startActivity(intent)
-            printLine("Launching ${shortcut.label}...")
+            launchingApp = true
+
+            val keyboard = getSystemService(
+                Context.INPUT_METHOD_SERVICE
+            ) as InputMethodManager
+
+            keyboard.hideSoftInputFromWindow(
+                window.decorView.windowToken,
+                0
+            )
+
+            startActivity(intent)
+
+            "Launching $name..."
+
         } catch (_: Exception) {
-            printLine("Unable to launch ${shortcut.label}.")
+
+            launchingApp = false
+            showKeyboard()
+
+            "Unable to launch $name."
         }
     }
 
-    fun activeAliases(): Map<String, AppShortcut> =
-        if (inHiddenFolder) {
-            directory.hidden
+    private fun getCoverStats(): String {
+
+        val activityManager =
+            getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+
+        val totalRam =
+            memoryInfo.totalMem / 1073741824.0
+
+        val usedRam =
+            (memoryInfo.totalMem - memoryInfo.availMem) /
+                    1073741824.0
+
+        val uptime = SystemClock.elapsedRealtime()
+        val hours = uptime / 3600000
+        val minutes = (uptime / 60000) % 60
+
+        val oneUI = try {
+            val version = Build.VERSION::class.java
+                .getField("SEM_PLATFORM_INT")
+                .getInt(null) - 90000
+
+            "${version / 10000}.${(version % 10000) / 100}"
+        } catch (_: Exception) {
+            "N/A"
+        }
+
+        val metrics = resources.displayMetrics
+
+        val cpu = if (Build.VERSION.SDK_INT >= 31) {
+            Build.SOC_MODEL
         } else {
-            directory.visible
+            Build.HARDWARE
         }
 
-    fun openHiddenFolder() {
-        inHiddenFolder = true
-
-        printLine(
-            "[?] Hidden Apps (${directory.hidden.size})"
-        )
-
-        val lines = directory.hidden.values
-            .map { it.label }
-            .distinct()
-            .sorted()
-            .joinToString("\n")
-
-        printLine(
-            lines.ifEmpty { "No hidden apps detected." }
-        )
+        return "AcheronOS\n" +
+                "Type help for all commands\n" +
+                "OS: Android ${Build.VERSION.RELEASE}\n" +
+                "One UI: $oneUI\n" +
+                "Kernel: ${System.getProperty("os.version")?.substringBefore("-")}\n" +
+                "Uptime: ${hours}h ${minutes}m" +
+                (if (uptime > 604800000L)
+                    ", Phone restart recommended"
+                else "") + "\n" +
+                "Resolution: ${metrics.widthPixels}x${metrics.heightPixels}\n" +
+                "AcheronOS: ${BuildConfig.ACHERONOS_VERSION}\n" +
+                "CPU: $cpu (${Runtime.getRuntime().availableProcessors()} cores)\n" +
+                "GPU: ${getGpuName()}\n" +
+                "Memory: ${"%.1f".format(usedRam)}GB/${"%.1f".format(totalRam)}GB"
     }
 
-    fun runCommand() {
-        val command = input.trim()
-        if (command.isEmpty()) return
+    private fun getGpuName(): String {
 
-        input = ""
-        val lower = command.lowercase()
-        val query = normalize(command)
-
-        val managementAction = lower.substringBefore(" ")
-        val managementLocation =
-            if (inHiddenFolder) "?" else "home"
-
-        if (managementAction == "hide" ||
-            managementAction == "unhide"
-        ) {
-            val requested = command
-                .substringAfter(" ", "")
-                .trim()
-
-            printLine("$managementLocation > $command")
-
-            if (requested.isEmpty()) {
-                printLine(
-                    "Usage: $managementAction <app name>"
-                )
-                return
-            }
-
-            val source = if (managementAction == "hide") {
-                directory.visible
-            } else {
-                directory.hidden
-            }
-
-            val candidates = source.values
-                .distinctBy { it.app.packageName }
-
-            val requestedKey = normalize(requested)
-
-            val exactMatches = candidates.filter {
-                normalize(it.label) == requestedKey
-            }
-
-            val matches = if (exactMatches.isNotEmpty()) {
-                exactMatches
-            } else if (requestedKey.length >= 2) {
-                candidates.filter {
-                    normalize(it.label).startsWith(requestedKey)
-                }
-            } else {
-                emptyList()
-            }
-
-            when {
-                matches.size > 1 -> {
-                    printLine(
-                        "Ambiguous app. Matches: " +
-                                matches.joinToString(", ") {
-                                    it.label
-                                }
-                    )
-                }
-
-                matches.size == 1 -> {
-                    val shortcut = matches.first()
-                    val packageName =
-                        shortcut.app.packageName
-
-                    if (managementAction == "hide") {
-                        saveHiddenPackages(
-                            hiddenPackages + packageName
-                        )
-
-                        printLine(
-                            "${shortcut.label} moved to ?"
-                        )
-                    } else {
-                        saveHiddenPackages(
-                            hiddenPackages - packageName
-                        )
-
-                        printLine(
-                            "${shortcut.label} moved to home"
-                        )
-                    }
-                }
-
-                else -> {
-                    printLine(
-                        "App not found: $requested"
-                    )
-                }
-            }
-
-            return
-        }
-
-        val commands = listOf(
-            "back",
-            "clear",
-            "help",
-            "aliases",
-            "apps",
-            "refresh",
-            "setwall",
-            "resetwall",
-            "textcol",
-            "resetcol",
-            "notifications",
-            "control"
+        val egl = android.opengl.EGL14.eglGetDisplay(
+            android.opengl.EGL14.EGL_DEFAULT_DISPLAY
         )
 
-        if (lower == "/" || lower == "back") {
-            inHiddenFolder = false
-            output = startupOutput
-            return
-        }
+        val version = IntArray(2)
 
-        if (lower == "clear") {
-            output = startupOutput
-            return
-        }
-
-        if (lower == "?") {
-            printLine("? > ?")
-            openHiddenFolder()
-            return
-        }
-
-        // Preserve the existing explicit app-opening command.
-        if (lower.startsWith("open ")) {
-            val requested = command.substring(5).trim()
-
-            val shortcut = resolveShortcut(
-                requested,
-                activeAliases()
-            )
-
-            val location = if (inHiddenFolder) "?" else "home"
-            printLine("$location > $command")
-
-            if (shortcut != null) {
-                launchApp(shortcut)
-            } else {
-                printLine("App not found: $requested")
-            }
-            return
-        }
-
-        val aliases = activeAliases()
-
-        val availableApps = aliases.values
-            .distinctBy { appKey(it.app) }
-
-        val exactCommand = commands.firstOrNull {
-            normalize(it) == query
-        }
-
-        // Find commands sharing the entered prefix.
-        val matchingCommands = if (query.length >= 2) {
-            commands.filter {
-                normalize(it).startsWith(query)
-            }
-        } else {
-            emptyList()
-        }
-
-        // Find apps sharing the same prefix.
-        val matchingApps = if (query.length >= 2) {
-            availableApps.filter {
-                normalize(it.label).startsWith(query)
-            }
-        } else {
-            emptyList()
-        }
-
-        // Full app names and generated aliases still work.
-        val exactApp = availableApps.firstOrNull {
-            normalize(it.label) == query
-        } ?: aliases[query]
-
-        val selectedCommand: String?
-        val selectedApp: AppShortcut?
-
-        when {
-            // Full command names take priority.
-            exactCommand != null -> {
-                selectedCommand = exactCommand
-                selectedApp = null
-            }
-
-            // Full app names or generated aliases work.
-            exactApp != null -> {
-                selectedCommand = null
-                selectedApp = exactApp
-            }
-
-            query.length < 2 -> {
-                printLine("Enter at least 2 letters.")
-                return
-            }
-
-            // Don't guess when a prefix matches multiple things.
-            matchingCommands.size + matchingApps.size > 1 -> {
-                val matches = (
-                        matchingCommands +
-                                matchingApps.map { it.label }
-                        ).distinct().sorted()
-
-                val location = if (inHiddenFolder) "?" else "home"
-                printLine("$location > $command")
-                printLine(
-                    "Ambiguous command. Matches: " +
-                            matches.joinToString(", ")
-                )
-                return
-            }
-
-            matchingCommands.size == 1 -> {
-                selectedCommand = matchingCommands.first()
-                selectedApp = null
-            }
-
-            matchingApps.size == 1 -> {
-                selectedCommand = null
-                selectedApp = matchingApps.first()
-            }
-
-            else -> {
-                val location = if (inHiddenFolder) "?" else "home"
-                printLine("$location > $command")
-                printLine("Unknown command: $command")
-                return
-            }
-        }
-
-        if (selectedCommand == "back") {
-            inHiddenFolder = false
-            output = startupOutput
-            return
-        }
-
-        if (selectedCommand == "clear") {
-            output = startupOutput
-            return
-        }
-
-        val location = if (inHiddenFolder) "?" else "home"
-        printLine("$location > $command")
-
-        if (selectedApp != null) {
-            launchApp(selectedApp)
-            return
-        }
-
-        when (selectedCommand) {
-            "help" -> {
-                printLine(
-                    """
-                QUICK LAUNCH
-                ab       - Launch app with 2+ letters
-                aliases  - Show app shortcuts
-                apps     - List detected apps
-                refresh  - Rescan installed apps
-
-                COMMAND SHORTCUTS
-                Type 2+ letters of any command.
-                More letters are needed if names conflict.
-                Commands and apps share prefixes.
-
-                CUSTOMISATION
-                setwall  - Choose wallpaper
-                resetwall - Remove wallpaper
-                textcol  - Choose text colour
-                resetcol - Reset text colour
-
-                NAVIGATION
-                back     - Return home and clear
-
-                SYSTEM
-                notifications - Notification help
-                control       - Android Settings
-                clear         - Clear terminal
-                help          - Command list
-                """.trimIndent()
-                )
-            }
-
-            "aliases" -> {
-                val lines = activeAliases()
-                    .toSortedMap()
-                    .entries
-                    .joinToString("\n") { (alias, shortcut) ->
-                        "$alias  ${shortcut.label}"
-                    }
-
-                printLine(
-                    lines.ifEmpty { "No apps detected." }
-                )
-            }
-
-            "apps" -> {
-                val lines = activeAliases()
-                    .values
-                    .map { it.label }
-                    .distinct()
-                    .sorted()
-                    .joinToString("\n")
-
-                printLine(
-                    lines.ifEmpty { "No apps detected." }
-                )
-            }
-
-            "refresh" -> {
-                apps = installedApps(context)
-
-                val refreshed = buildDirectory(context, apps, hiddenPackages)
-
-                printLine(
-                    "App detection refreshed: " +
-                            "${refreshed.visible.size} visible, " +
-                            "${refreshed.hidden.size} hidden."
-                )
-            }
-
-            "setwall" -> {
-                wallpaperPicker.launch(arrayOf("image/*"))
-            }
-
-            "resetwall" -> {
-                wallpaperUri = null
-
-                preferences.edit()
-                    .remove(PREF_WALLPAPER)
-                    .apply()
-
-                printLine("Wallpaper reset to black.")
-            }
-
-            "textcol" -> {
-                showColorPicker = true
-            }
-
-            "resetcol" -> {
-                textColor = DefaultTextColor
-
-                preferences.edit()
-                    .putInt(
-                        PREF_TEXT_COLOR,
-                        android.graphics.Color.WHITE
-                    )
-                    .apply()
-
-                printLine("Text colour reset to white.")
-            }
-
-            "notifications" -> {
-                printLine(
-                    "Swipe down from the top to view notifications."
-                )
-
-                printLine(
-                    "Direct panel controls are coming later."
-                )
-            }
-
-            "control" -> {
-                try {
-                    context.startActivity(
-                        Intent(Settings.ACTION_SETTINGS)
-                    )
-
-                    printLine("Opening Android Settings...")
-                } catch (_: Exception) {
-                    printLine("Unable to open Settings.")
-                }
-            }
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(TerminalBlack)
-    ) {
-        if (wallpaperImage != null) {
-            Image(
-                bitmap = wallpaperImage!!,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Color.Black.copy(alpha = 0.30f)
-                    )
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .imePadding()
-                .padding(20.dp)
-        ) {
-
-
-            Text(
-                text = "AcheronOS",
-                color = textColor,
-                fontSize = 25.sp,
-                fontFamily = FontFamily.Monospace
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "All in one suite & app launcher | $ACHERONOS_VERSION",
-                color = textColor,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace
-            )
-
-            HorizontalDivider(
-                modifier = Modifier.padding(
-                    vertical = 16.dp
-                ),
-                color = textColor
-            )
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(scrollState),
-                verticalArrangement =
-                    Arrangement.spacedBy(8.dp)
-            ) {
-                output.forEach { line ->
-                    Text(
-                        text = line,
-                        color = textColor,
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
-
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-
-                prefix = {
-                    Text(
-                        if (inHiddenFolder) "?>" else ">",
-                        color = textColor
-                    )
-                },
-
-                placeholder = {
-                    Text(
-                        " Enter command",
-                        color = textColor.copy(alpha = 0.8f)
-                    )
-                },
-
-                keyboardOptions = KeyboardOptions(
-                    imeAction = ImeAction.Go
-                ),
-
-                keyboardActions = KeyboardActions(
-                    onGo = { runCommand() }
-                ),
-
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = textColor,
-                    unfocusedTextColor = textColor,
-                    focusedBorderColor = textColor,
-                    unfocusedBorderColor = textColor,
-                    cursorColor = textColor,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedPrefixColor = textColor,
-                    unfocusedPrefixColor = textColor
-                )
-            )
-        }
-
-        if (!WindowInsets.isImeVisible) {
-            Box(
-                modifier = Modifier.align(
-                    Alignment.BottomCenter
-                )
-            ) {
-                BinaryNavigationDecoration(textColor)
-            }
-        }
-    }
-
-    if (showColorPicker) {
-        TextColorPicker(
-            initialColor = textColor,
-            onApply = { selected ->
-                textColor = selected
-
-                preferences.edit()
-                    .putInt(
-                        PREF_TEXT_COLOR,
-                        selected.toArgb()
-                    )
-                    .apply()
-
-                showColorPicker = false
-                printLine("Text colour updated.")
-            },
-            onDismiss = {
-                showColorPicker = false
-            }
+        android.opengl.EGL14.eglInitialize(
+            egl, version, 0, version, 1
         )
+
+        val attributes = intArrayOf(
+            android.opengl.EGL14.EGL_RENDERABLE_TYPE, 4,
+            android.opengl.EGL14.EGL_SURFACE_TYPE,
+            android.opengl.EGL14.EGL_PBUFFER_BIT,
+            android.opengl.EGL14.EGL_NONE
+        )
+
+        val configs =
+            arrayOfNulls<android.opengl.EGLConfig>(1)
+
+        val count = IntArray(1)
+
+        android.opengl.EGL14.eglChooseConfig(
+            egl, attributes, 0, configs, 0, 1, count, 0
+        )
+
+        val config = configs[0] ?: return "Unknown"
+
+        val glContext = android.opengl.EGL14.eglCreateContext(
+            egl,
+            config,
+            android.opengl.EGL14.EGL_NO_CONTEXT,
+            intArrayOf(
+                android.opengl.EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
+                android.opengl.EGL14.EGL_NONE
+            ),
+            0
+        )
+
+        val surface = android.opengl.EGL14.eglCreatePbufferSurface(
+            egl,
+            config,
+            intArrayOf(
+                android.opengl.EGL14.EGL_WIDTH, 1,
+                android.opengl.EGL14.EGL_HEIGHT, 1,
+                android.opengl.EGL14.EGL_NONE
+            ),
+            0
+        )
+
+        android.opengl.EGL14.eglMakeCurrent(
+            egl, surface, surface, glContext
+        )
+
+        val gpu = android.opengl.GLES20.glGetString(
+            android.opengl.GLES20.GL_RENDERER
+        ) ?: "Unknown"
+
+        android.opengl.EGL14.eglMakeCurrent(
+            egl,
+            android.opengl.EGL14.EGL_NO_SURFACE,
+            android.opengl.EGL14.EGL_NO_SURFACE,
+            android.opengl.EGL14.EGL_NO_CONTEXT
+        )
+
+        android.opengl.EGL14.eglDestroySurface(
+            egl, surface
+        )
+
+        android.opengl.EGL14.eglDestroyContext(
+            egl, glContext
+        )
+
+        android.opengl.EGL14.eglTerminate(egl)
+
+        return gpu
     }
 }
