@@ -4,10 +4,12 @@ package com.example.acheronos
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ResolveInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -38,6 +40,8 @@ class MainActivity : ComponentActivity() {
     private var inHiddenFolder = false
     private var returnedHome = false
 
+    private val mascotSize = 17f
+
     private val commands = listOf(
         "help",
         "apps",
@@ -45,6 +49,27 @@ class MainActivity : ComponentActivity() {
         "unhide",
         "back"
     )
+
+    private val androidMascot = """
+        |        \            /
+        |         \          /
+        |         +hydNNNNdyh+
+        |       +mMMMMMMMMMMMMm+
+        |      dMMMMMMMMMMMMMMMMd
+        |      hMMMMMMMMMMMMMMMMh
+        |
+        | dMMMb dMMMMMMMMMMMMMMb dmmmb
+        | MMMMM MMMMMMMMMMMMMMMM MMMMM
+        | MMMMM MMMMMMMMMMMMMMMM MMMMM
+        | MMMMM MMMMMMMMMMMMMMMM MMMMM
+        | MMMMM MMMMMMMMMMMMMMMM MMMMM
+        | ""yy' MMMMMMMMMMMMMMMM 'yy""
+        |
+        |        dMMMb    dMMMb
+        |        MMMMM    MMMMM
+        |        MMMMM    MMMMM
+        |        MMMMM    MMMMM
+    """.trimMargin()
 
     private val preferences by lazy {
         getSharedPreferences(
@@ -141,6 +166,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun coverScreen() {
+        createTerminalScreen(false)
+    }
+
+    private fun innerScreen() {
+        createTerminalScreen(true)
+    }
+
+    private fun createTerminalScreen(isInnerScreen: Boolean) {
 
         window.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
@@ -151,6 +184,16 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(Color.BLACK)
         }
 
+        val screenLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.BLACK)
+
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.BLACK)
             isVerticalScrollBarEnabled = false
@@ -158,10 +201,18 @@ class MainActivity : ComponentActivity() {
             isFillViewport = true
             overScrollMode = ScrollView.OVER_SCROLL_NEVER
 
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
+            layoutParams = if (isInnerScreen) {
+                LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0.30f
+                )
+            } else {
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+            }
         }
 
         terminalScroll = scroll
@@ -247,7 +298,58 @@ class MainActivity : ComponentActivity() {
         content.addView(output)
 
         scroll.addView(content)
-        root.addView(scroll)
+        screenLayout.addView(scroll)
+
+        if (isInnerScreen) {
+
+            val centrePanel = FrameLayout(this).apply {
+                setBackgroundColor(Color.BLACK)
+
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0.40f
+                )
+            }
+
+            val mascot = TextView(this).apply {
+                text = androidMascot
+                setTextColor(Color.WHITE)
+                typeface = Typeface.MONOSPACE
+
+                textSize = mascotSize
+                textScaleX = 0.8f
+
+                includeFontPadding = false
+                gravity = Gravity.TOP or Gravity.START
+
+                setPadding(0, 0, 0, 0)
+                setHorizontallyScrolling(true)
+
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                )
+            }
+
+            centrePanel.addView(mascot)
+
+            val rightPanel = FrameLayout(this).apply {
+                setBackgroundColor(Color.BLACK)
+
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    0.30f
+                )
+            }
+
+            screenLayout.addView(centrePanel)
+            screenLayout.addView(rightPanel)
+        }
+
+        root.addView(screenLayout)
 
         prompt.setOnClickListener {
             commandInput.requestFocus()
@@ -267,6 +369,7 @@ class MainActivity : ComponentActivity() {
                 }
 
             if (submit) {
+
                 val command =
                     commandInput.text.toString().trim()
 
@@ -296,6 +399,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 true
+
             } else {
                 enterPressed
             }
@@ -348,28 +452,6 @@ class MainActivity : ComponentActivity() {
         commandInput.requestFocus()
         ViewCompat.requestApplyInsets(root)
         showKeyboard()
-    }
-
-    private fun innerScreen() {
-
-        terminalInput = null
-        terminalPrompt = null
-        terminalScroll = null
-
-        window.setSoftInputMode(
-            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
-        )
-
-        WindowCompat.getInsetsController(
-            window,
-            window.decorView
-        ).hide(WindowInsetsCompat.Type.ime())
-
-        val background = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-        }
-
-        setContentView(background)
     }
 
     private fun normalize(value: String): String {
@@ -541,7 +623,6 @@ class MainActivity : ComponentActivity() {
     private fun runCommand(command: String): String {
 
         val cleaned = command.trim()
-        val lower = cleaned.lowercase()
 
         if (cleaned == "?") {
             return executeCommand("?", "")
@@ -557,8 +638,6 @@ class MainActivity : ComponentActivity() {
         val argument =
             parts.getOrNull(1)?.trim() ?: ""
 
-        // Full command names take priority.
-
         if (firstWord in commands) {
             return executeCommand(
                 firstWord,
@@ -573,8 +652,6 @@ class MainActivity : ComponentActivity() {
         }
 
         val apps = activeApps()
-
-        // Find matching command prefixes.
 
         val commandMatches =
             if (firstWord.length >= 2) {
@@ -593,13 +670,9 @@ class MainActivity : ComponentActivity() {
                 emptyList()
             }
 
-        // Find matching app prefixes.
-
         val appMatches = apps.filter {
             normalize(appName(it)).startsWith(query)
         }
-
-        // Commands and apps share the prefix system.
 
         val totalMatches =
             commandMatches.size + appMatches.size
@@ -755,6 +828,76 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun getDeviceName(): String {
+
+        if (Build.MODEL.equals(
+                "SM-F976B",
+                ignoreCase = true
+            )
+        ) {
+            return "Galaxy Z Fold8 Ultra"
+        }
+
+        val manufacturer = Build.MANUFACTURER
+            .replaceFirstChar { it.uppercase() }
+
+        val model = Build.MODEL
+
+        return if (
+            model.startsWith(
+                manufacturer,
+                ignoreCase = true
+            )
+        ) {
+            model
+        } else {
+            "$manufacturer $model"
+        }
+    }
+
+    private fun getSystemTemperature(): String {
+
+        return try {
+
+            val batteryIntent = registerReceiver(
+                null,
+                IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            )
+
+            val temperature = batteryIntent?.getIntExtra(
+                BatteryManager.EXTRA_TEMPERATURE,
+                Int.MIN_VALUE
+            ) ?: Int.MIN_VALUE
+
+            if (temperature == Int.MIN_VALUE) {
+                "N/A"
+            } else {
+                "${"%.1f".format(temperature / 10.0)}°C"
+            }
+
+        } catch (_: Exception) {
+            "N/A"
+        }
+    }
+
+    private fun getInstalledAppCount(): Int {
+
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        @Suppress("DEPRECATION")
+        val apps = packageManager.queryIntentActivities(
+            launcherIntent,
+            0
+        )
+
+        return apps
+            .map { it.activityInfo.packageName }
+            .distinct()
+            .size
+    }
+
     private fun getCoverStats(): String {
 
         val activityManager =
@@ -792,8 +935,15 @@ class MainActivity : ComponentActivity() {
             Build.HARDWARE
         }
 
+        val deviceName = getDeviceName()
+        val deviceModel = Build.MODEL
+        val temperature = getSystemTemperature()
+        val appCount = getInstalledAppCount()
+
         return "AcheronOS\n" +
                 "Type help for all commands\n" +
+                "Device: $deviceName\n" +
+                "Model: $deviceModel\n" +
                 "OS: Android ${Build.VERSION.RELEASE}\n" +
                 "One UI: $oneUI\n" +
                 "Kernel: ${System.getProperty("os.version")?.substringBefore("-")}\n" +
@@ -805,7 +955,9 @@ class MainActivity : ComponentActivity() {
                 "AcheronOS: ${BuildConfig.ACHERONOS_VERSION}\n" +
                 "CPU: $cpu (${Runtime.getRuntime().availableProcessors()} cores)\n" +
                 "GPU: ${getGpuName()}\n" +
-                "Memory: ${"%.1f".format(usedRam)}GB/${"%.1f".format(totalRam)}GB"
+                "Memory: ${"%.1f".format(usedRam)}GB/${"%.1f".format(totalRam)}GB\n" +
+                "Battery temp: $temperature\n" +
+                "Installed apps: $appCount"
     }
 
     private fun getGpuName(): String {
