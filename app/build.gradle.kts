@@ -59,7 +59,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.acheronos"
-        minSdk = 31
+        minSdk = 26
         targetSdk = 37
 
         versionCode = 1

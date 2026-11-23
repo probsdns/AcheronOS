@@ -14,12 +14,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,9 +35,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -319,75 +325,11 @@ private fun buildDirectory(
     )
 }
 
-private fun getGpuName(): String {
-    val display = android.opengl.EGL14.eglGetDisplay(
-        android.opengl.EGL14.EGL_DEFAULT_DISPLAY
-    )
-
-    val version = IntArray(2)
-    android.opengl.EGL14.eglInitialize(display, version, 0, version, 1)
-
-    val attributes = intArrayOf(
-        android.opengl.EGL14.EGL_RENDERABLE_TYPE, 4,
-        android.opengl.EGL14.EGL_SURFACE_TYPE,
-        android.opengl.EGL14.EGL_PBUFFER_BIT,
-        android.opengl.EGL14.EGL_NONE
-    )
-
-    val configs = arrayOfNulls<android.opengl.EGLConfig>(1)
-    val count = IntArray(1)
-
-    android.opengl.EGL14.eglChooseConfig(
-        display, attributes, 0, configs, 0, 1, count, 0
-    )
-
-    val config = configs[0] ?: return "Unknown"
-
-    val glContext = android.opengl.EGL14.eglCreateContext(
-        display, config,
-        android.opengl.EGL14.EGL_NO_CONTEXT,
-        intArrayOf(
-            android.opengl.EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
-            android.opengl.EGL14.EGL_NONE
-        ), 0
-    )
-
-    val surface = android.opengl.EGL14.eglCreatePbufferSurface(
-        display, config,
-        intArrayOf(
-            android.opengl.EGL14.EGL_WIDTH, 1,
-            android.opengl.EGL14.EGL_HEIGHT, 1,
-            android.opengl.EGL14.EGL_NONE
-        ), 0
-    )
-
-    android.opengl.EGL14.eglMakeCurrent(
-        display, surface, surface, glContext
-    )
-
-    val gpu = android.opengl.GLES20.glGetString(
-        android.opengl.GLES20.GL_RENDERER
-    ) ?: "Unknown"
-
-    android.opengl.EGL14.eglMakeCurrent(
-        display,
-        android.opengl.EGL14.EGL_NO_SURFACE,
-        android.opengl.EGL14.EGL_NO_SURFACE,
-        android.opengl.EGL14.EGL_NO_CONTEXT
-    )
-
-    android.opengl.EGL14.eglDestroySurface(display, surface)
-    android.opengl.EGL14.eglDestroyContext(display, glContext)
-    android.opengl.EGL14.eglTerminate(display)
-
-    return gpu
-}
 class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.setBackgroundDrawableResource(android.R.color.black)
 
         WindowCompat.setDecorFitsSystemWindows(
             window,
@@ -1302,6 +1244,7 @@ private fun AcheronOS() {
             output = startupOutput
             return
         }
+
         val location = if (inHiddenFolder) "?" else "home"
         printLine("$location > $command")
 
@@ -1314,32 +1257,32 @@ private fun AcheronOS() {
             "help" -> {
                 printLine(
                     """
-                    QUICK LAUNCH
-                    ab       - Launch app with 2+ letters
-                    aliases  - Show app shortcuts
-                    apps     - List detected apps
-                    refresh  - Rescan installed apps
+                QUICK LAUNCH
+                ab       - Launch app with 2+ letters
+                aliases  - Show app shortcuts
+                apps     - List detected apps
+                refresh  - Rescan installed apps
 
-                    COMMAND SHORTCUTS
-                    Type 2+ letters of any command.
-                    More letters are needed if names conflict.
-                    Commands and apps share prefixes.
+                COMMAND SHORTCUTS
+                Type 2+ letters of any command.
+                More letters are needed if names conflict.
+                Commands and apps share prefixes.
 
-                    CUSTOMISATION
-                    setwall  - Choose wallpaper
-                    resetwall - Remove wallpaper
-                    textcol  - Choose text colour
-                    resetcol - Reset text colour
+                CUSTOMISATION
+                setwall  - Choose wallpaper
+                resetwall - Remove wallpaper
+                textcol  - Choose text colour
+                resetcol - Reset text colour
 
-                    NAVIGATION
-                    back     - Return home and clear
+                NAVIGATION
+                back     - Return home and clear
 
-                    SYSTEM
-                    notifications - Notification help
-                    control       - Android Settings
-                    clear         - Clear terminal
-                    help          - Command list
-                    """.trimIndent()
+                SYSTEM
+                notifications - Notification help
+                control       - Android Settings
+                clear         - Clear terminal
+                help          - Command list
+                """.trimIndent()
                 )
             }
 
@@ -1436,146 +1379,154 @@ private fun AcheronOS() {
         }
     }
 
-    val configuration =
-        androidx.compose.ui.platform.LocalConfiguration.current
-
-    val isFolded = configuration.smallestScreenWidthDp < 600
-
-    val isLandscape = configuration.orientation ==
-            android.content.res.Configuration.ORIENTATION_LANDSCAPE
-
-    val gpuName = remember { getGpuName() }
-
-    val activityManager = context.getSystemService(
-        android.content.Context.ACTIVITY_SERVICE
-    ) as android.app.ActivityManager
-
-    val memoryInfo = android.app.ActivityManager.MemoryInfo()
-    activityManager.getMemoryInfo(memoryInfo)
-
-    val totalRam = memoryInfo.totalMem / 1073741824.0
-    val usedRam = (memoryInfo.totalMem - memoryInfo.availMem) / 1073741824.0
-
-    val stats =
-        "AcheronOS\n" +
-                "Unfold ur phone to use AcheronOS Suite\n" +
-                "OS: Android ${android.os.Build.VERSION.RELEASE}\n" +
-                "One UI: ${
-                    try {
-                        val version = android.os.Build.VERSION::class.java
-                            .getField("SEM_PLATFORM_INT").getInt(null) - 90000
-                        "${version / 10000}.${(version % 10000) / 100}"
-                    } catch (_: Exception) {
-                        "N/A"
-                    }
-                }\n" +
-                "Kernel: ${System.getProperty("os.version")?.substringBefore("-")}\n" +
-                ("Uptime: ${android.os.SystemClock.elapsedRealtime() / 3600000}h ${(android.os.SystemClock.elapsedRealtime() / 60000) % 60}m" +
-                        if (android.os.SystemClock.elapsedRealtime() > 604800000L)
-                            ", Phone restart recommended"
-                        else "") + "\n" +
-                "Resolution: ${context.resources.displayMetrics.widthPixels}x${context.resources.displayMetrics.heightPixels}\n" +
-                "AcheronOS: $ACHERONOS_VERSION\n" +
-                "CPU: ${android.os.Build.SOC_MODEL} (${
-                    Runtime.getRuntime().availableProcessors()
-                } cores)\n" +
-                "GPU: $gpuName\n" +
-                "Memory: ${"%.1f".format(usedRam)}GB/${"%.1f".format(totalRam)}GB"
-
-    val androidArt = """
-        \            /
-         \          /
-         +hydNNNNdyh+
-       +mMMMMMMMMMMMMm+
-      dMMMMMMMMMMMMMMMMd
-      hMMMMMMMMMMMMMMMMh
-
- dMMMb dMMMMMMMMMMMMMMb dmmmb
- MMMMM MMMMMMMMMMMMMMMM MMMMM
- MMMMM MMMMMMMMMMMMMMMM MMMMM
- MMMMM MMMMMMMMMMMMMMMM MMMMM
- MMMMM MMMMMMMMMMMMMMMM MMMMM
- MMMMM MMMMMMMMMMMMMMMM MMMMM
- ""yy' MMMMMMMMMMMMMMMM 'yy""
-
-        dMMMb    dMMMb
-        MMMMM    MMMMM
-        MMMMM    MMMMM
-        MMMMM    MMMMM
-    """.trimIndent()
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
-            .statusBarsPadding()
-            .displayCutoutPadding()
-            .navigationBarsPadding()
-            .padding(16.dp),
-        contentAlignment = Alignment.TopStart
+            .background(TerminalBlack)
     ) {
-        if (isFolded) {
-            if (isLandscape) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Text(
-                        text = stats,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Left,
-                        modifier = Modifier.weight(1f)
-                    )
+        if (wallpaperImage != null) {
+            Image(
+                bitmap = wallpaperImage!!,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
 
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Text(
-                        text = androidArt,
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
-                        fontFamily = FontFamily.Monospace,
-                        softWrap = false,
-                        modifier = Modifier.offset(x = (-100).dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Color.Black.copy(alpha = 0.30f)
                     )
-                }
-            } else {
-                Text(
-                    text = stats + "\n" + androidArt,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    lineHeight = 23.sp,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Left
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.Top
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .imePadding()
+                .padding(20.dp)
+        ) {
+
+
+            Text(
+                text = "AcheronOS",
+                color = textColor,
+                fontSize = 25.sp,
+                fontFamily = FontFamily.Monospace
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "All in one suite & app launcher | $ACHERONOS_VERSION",
+                color = textColor,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace
+            )
+
+            HorizontalDivider(
+                modifier = Modifier.padding(
+                    vertical = 16.dp
+                ),
+                color = textColor
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+                verticalArrangement =
+                    Arrangement.spacedBy(8.dp)
             ) {
-
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
+                output.forEach { line ->
                     Text(
-                        text = stats + "\n" + androidArt,
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
+                        text = line,
+                        color = textColor,
                         fontFamily = FontFamily.Monospace,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Left
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
+            }
 
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                }
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+
+                prefix = {
+                    Text(
+                        if (inHiddenFolder) "?>" else ">",
+                        color = textColor
+                    )
+                },
+
+                placeholder = {
+                    Text(
+                        " Enter command",
+                        color = textColor.copy(alpha = 0.8f)
+                    )
+                },
+
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Go
+                ),
+
+                keyboardActions = KeyboardActions(
+                    onGo = { runCommand() }
+                ),
+
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedBorderColor = textColor,
+                    unfocusedBorderColor = textColor,
+                    cursorColor = textColor,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedPrefixColor = textColor,
+                    unfocusedPrefixColor = textColor
+                )
+            )
+        }
+
+        if (!WindowInsets.isImeVisible) {
+            Box(
+                modifier = Modifier.align(
+                    Alignment.BottomCenter
+                )
+            ) {
+                BinaryNavigationDecoration(textColor)
             }
         }
+    }
+
+    if (showColorPicker) {
+        TextColorPicker(
+            initialColor = textColor,
+            onApply = { selected ->
+                textColor = selected
+
+                preferences.edit()
+                    .putInt(
+                        PREF_TEXT_COLOR,
+                        selected.toArgb()
+                    )
+                    .apply()
+
+                showColorPicker = false
+                printLine("Text colour updated.")
+            },
+            onDismiss = {
+                showColorPicker = false
+            }
+        )
     }
 }
