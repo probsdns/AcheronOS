@@ -1,3 +1,4 @@
+
 package com.example.acheronos
 
 import android.app.ActivityManager
@@ -35,6 +36,15 @@ class MainActivity : ComponentActivity() {
     private var isResumed = false
     private var launchingApp = false
     private var inHiddenFolder = false
+    private var returnedHome = false
+
+    private val commands = listOf(
+        "help",
+        "apps",
+        "hide",
+        "unhide",
+        "back"
+    )
 
     private val preferences by lazy {
         getSharedPreferences(
@@ -261,10 +271,13 @@ class MainActivity : ComponentActivity() {
                     commandInput.text.toString().trim()
 
                 if (command.isNotEmpty()) {
+
+                    returnedHome = false
+
                     output.text = runCommand(command)
                     commandInput.text.clear()
 
-                    if (command.equals("back", ignoreCase = true)) {
+                    if (returnedHome) {
                         scroll.post {
                             scroll.scrollTo(0, 0)
                         }
@@ -530,21 +543,95 @@ class MainActivity : ComponentActivity() {
         val cleaned = command.trim()
         val lower = cleaned.lowercase()
 
-        if (lower == "hide" || lower.startsWith("hide ")) {
-            return moveApp(
-                cleaned.substringAfter(" ", "").trim(),
-                true
+        if (cleaned == "?") {
+            return executeCommand("?", "")
+        }
+
+        val parts = cleaned.split(
+            Regex("\\s+"),
+            limit = 2
+        )
+
+        val firstWord = parts[0].lowercase()
+
+        val argument =
+            parts.getOrNull(1)?.trim() ?: ""
+
+        // Full command names take priority.
+
+        if (firstWord in commands) {
+            return executeCommand(
+                firstWord,
+                argument
             )
         }
 
-        if (lower == "unhide" || lower.startsWith("unhide ")) {
-            return moveApp(
-                cleaned.substringAfter(" ", "").trim(),
-                false
+        val query = normalize(cleaned)
+
+        if (query.length < 2) {
+            return "Enter at least 2 letters."
+        }
+
+        val apps = activeApps()
+
+        // Find matching command prefixes.
+
+        val commandMatches =
+            if (firstWord.length >= 2) {
+
+                commands.filter { candidate ->
+
+                    candidate.startsWith(firstWord) &&
+                            (
+                                    argument.isEmpty() ||
+                                            candidate == "hide" ||
+                                            candidate == "unhide"
+                                    )
+                }
+
+            } else {
+                emptyList()
+            }
+
+        // Find matching app prefixes.
+
+        val appMatches = apps.filter {
+            normalize(appName(it)).startsWith(query)
+        }
+
+        // Commands and apps share the prefix system.
+
+        val totalMatches =
+            commandMatches.size + appMatches.size
+
+        if (totalMatches > 1) {
+            return "Provide more letters."
+        }
+
+        if (commandMatches.size == 1) {
+            return executeCommand(
+                commandMatches.first(),
+                argument
             )
         }
 
-        return when (lower) {
+        return launchApp(cleaned)
+    }
+
+    private fun executeCommand(
+        command: String,
+        argument: String
+    ): String {
+
+        if (
+            argument.isNotEmpty() &&
+            command != "hide" &&
+            command != "unhide"
+        ) {
+            return "Usage: $command"
+        }
+
+        return when (command) {
 
             "help" -> """
                 COMMANDS
@@ -556,11 +643,26 @@ class MainActivity : ComponentActivity() {
                 unhide <app> - Move app to home
                 back - Return home and clear output
                 <app name> - Launch an app
-                <2+ letters> - Launch app by prefix
+
+                PREFIXES
+
+                Type at least 2 letters of
+                any command or app name.
+
+                Provide more letters if
+                multiple matches exist.
             """.trimIndent()
 
             "apps" -> {
                 listApps(visibleApps())
+            }
+
+            "hide" -> {
+                moveApp(argument, true)
+            }
+
+            "unhide" -> {
+                moveApp(argument, false)
             }
 
             "?" -> {
@@ -578,6 +680,7 @@ class MainActivity : ComponentActivity() {
 
             "back" -> {
                 inHiddenFolder = false
+                returnedHome = true
                 updatePrompt()
 
                 terminalScroll?.post {
@@ -587,7 +690,9 @@ class MainActivity : ComponentActivity() {
                 ""
             }
 
-            else -> launchApp(cleaned)
+            else -> {
+                "Unknown command: $command"
+            }
         }
     }
 
