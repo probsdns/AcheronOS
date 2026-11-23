@@ -39,8 +39,10 @@ class MainActivity : ComponentActivity() {
     private var launchingApp = false
     private var inHiddenFolder = false
     private var returnedHome = false
+    private var commandFailed = false
 
-    private val mascotSize = 17f
+    private val mascotSize = 15f
+    private val landscapeCameraPadding = 48
 
     private val commands = listOf(
         "help",
@@ -103,6 +105,12 @@ class MainActivity : ComponentActivity() {
         if (hasFocus) {
             showKeyboard()
         }
+    }
+
+    private fun dp(value: Int): Int {
+        return (
+                value * resources.displayMetrics.density
+                ).toInt()
     }
 
     private fun showKeyboard() {
@@ -175,6 +183,21 @@ class MainActivity : ComponentActivity() {
 
     private fun createTerminalScreen(isInnerScreen: Boolean) {
 
+        if (isInnerScreen && Build.VERSION.SDK_INT >= 28) {
+            val attributes = window.attributes
+
+            attributes.layoutInDisplayCutoutMode =
+                if (Build.VERSION.SDK_INT >= 30) {
+                    WindowManager.LayoutParams
+                        .LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else {
+                    WindowManager.LayoutParams
+                        .LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+
+            window.attributes = attributes
+        }
+
         window.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
                     WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
@@ -236,9 +259,15 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 0, 0, 0)
         }
 
+        // Vertically expanding command area.
         val promptRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP or Gravity.START
+
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
 
         val prompt = TextView(this).apply {
@@ -247,28 +276,47 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.MONOSPACE
             textSize = 15f
             setPadding(0, 0, 0, 0)
+
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
 
         terminalPrompt = prompt
 
         val commandInput = EditText(this).apply {
+
+            setSingleLine(false)
+
             inputType = InputType.TYPE_CLASS_TEXT or
+                    InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                     InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
 
-            setSingleLine(true)
+            // Wrap instead of scrolling horizontally.
+            setHorizontallyScrolling(false)
+
+            minLines = 1
+            maxLines = Int.MAX_VALUE
+
+            gravity = Gravity.TOP or Gravity.START
+
             setTextColor(Color.WHITE)
             typeface = Typeface.MONOSPACE
             textSize = 15f
+
             this.background = null
             setPadding(0, 0, 0, 0)
+
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
 
             imeOptions = EditorInfo.IME_ACTION_DONE or
                     EditorInfo.IME_FLAG_NO_EXTRACT_UI
 
             layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
             )
 
             if (Build.VERSION.SDK_INT >= 29) {
@@ -356,35 +404,87 @@ class MainActivity : ComponentActivity() {
             showKeyboard()
         }
 
-        commandInput.setOnEditorActionListener { _, actionId, event ->
+        // Keep the active input visible as it grows.
+        commandInput.addOnLayoutChangeListener {
+                _, _, top, _, bottom,
+                _, oldTop, _, oldBottom ->
 
-            val enterPressed =
-                event?.keyCode == KeyEvent.KEYCODE_ENTER
+            val newHeight = bottom - top
+            val oldHeight = oldBottom - oldTop
 
-            val submit =
-                if (enterPressed) {
-                    event?.action == KeyEvent.ACTION_DOWN
-                } else {
-                    actionId == EditorInfo.IME_ACTION_DONE
+            if (
+                newHeight > oldHeight &&
+                commandInput.hasFocus()
+            ) {
+                commandInput.post {
+                    val cursorOffset =
+                        commandInput.selectionEnd.coerceAtLeast(0)
+
+                    val textLayout = commandInput.layout
+
+                    if (textLayout != null) {
+                        val line = textLayout.getLineForOffset(
+                            cursorOffset
+                        )
+
+                        val cursorRect = android.graphics.Rect(
+                            0,
+                            textLayout.getLineTop(line),
+                            commandInput.width,
+                            textLayout.getLineBottom(line)
+                        )
+
+                        commandInput.requestRectangleOnScreen(
+                            cursorRect,
+                            false
+                        )
+                    }
                 }
+            }
+        }
 
-            if (submit) {
+        // Shared submission function for keyboard actions.
+        fun submitCommand() {
 
-                val command =
-                    commandInput.text.toString().trim()
+            val command = commandInput.text
+                .toString()
+                .replace(Regex("[\\r\\n]+"), " ")
+                .trim()
 
-                if (command.isNotEmpty()) {
+            if (command.isNotEmpty()) {
 
-                    returnedHome = false
+                returnedHome = false
+                commandFailed = false
 
-                    output.text = runCommand(command)
-                    commandInput.text.clear()
+                val result = runCommand(command)
 
-                    if (returnedHome) {
+                when {
+                    returnedHome -> {
+                        output.text = ""
+
                         scroll.post {
                             scroll.scrollTo(0, 0)
                         }
-                    } else {
+                    }
+
+                    commandFailed -> {
+                        if (output.text.isNotEmpty()) {
+                            output.append("\n")
+                        }
+
+                        output.append(result)
+
+                        scroll.post {
+                            scroll.smoothScrollTo(
+                                0,
+                                promptRow.top
+                            )
+                        }
+                    }
+
+                    result.isNotEmpty() -> {
+                        output.text = result
+
                         scroll.post {
                             scroll.smoothScrollTo(
                                 0,
@@ -394,16 +494,100 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (!launchingApp) {
-                    showKeyboard()
-                }
+                commandInput.text.clear()
+            }
 
-                true
-
-            } else {
-                enterPressed
+            if (!launchingApp) {
+                showKeyboard()
             }
         }
+
+        // Enter submits rather than inserting a newline.
+        commandInput.setOnEditorActionListener {
+                _, actionId, event ->
+
+            val enterPressed =
+                event?.keyCode == KeyEvent.KEYCODE_ENTER
+
+            when {
+                enterPressed -> {
+                    if (
+                        event?.action == KeyEvent.ACTION_DOWN &&
+                        event.repeatCount == 0
+                    ) {
+                        submitCommand()
+                    }
+
+                    true
+                }
+
+                actionId == EditorInfo.IME_ACTION_DONE ||
+                        actionId == EditorInfo.IME_ACTION_GO ||
+                        actionId == EditorInfo.IME_ACTION_SEND -> {
+                    submitCommand()
+                    true
+                }
+
+                else -> false
+            }
+        }
+
+        // Handle keyboards that insert a newline instead
+        // of sending an editor action.
+        var handlingNewline = false
+
+        commandInput.addTextChangedListener(
+            object : android.text.TextWatcher {
+
+                override fun beforeTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    count: Int,
+                    after: Int
+                ) {}
+
+                override fun onTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    before: Int,
+                    count: Int
+                ) {}
+
+                override fun afterTextChanged(
+                    editable: android.text.Editable?
+                ) {
+                    if (handlingNewline || editable == null) {
+                        return
+                    }
+
+                    if (
+                        editable.contains('\n') ||
+                        editable.contains('\r')
+                    ) {
+                        handlingNewline = true
+
+                        try {
+                            val cleaned = editable.toString()
+                                .replace(
+                                    Regex("[\\r\\n]+"),
+                                    " "
+                                )
+
+                            editable.replace(
+                                0,
+                                editable.length,
+                                cleaned
+                            )
+
+                            submitCommand()
+
+                        } finally {
+                            handlingNewline = false
+                        }
+                    }
+                }
+            }
+        )
 
         var keyboardWasVisible = false
 
@@ -424,15 +608,64 @@ class MainActivity : ComponentActivity() {
                 WindowInsetsCompat.Type.ime()
             )
 
-            val padding =
-                (16 * resources.displayMetrics.density).toInt()
+            val padding = dp(16)
 
-            view.setPadding(
-                bars.left + padding,
-                bars.top + padding,
-                bars.right + padding,
-                maxOf(bars.bottom, ime.bottom) + padding
-            )
+            if (isInnerScreen) {
+
+                val cutout = insets.displayCutout
+                    ?: ViewCompat.getRootWindowInsets(root)
+                        ?.displayCutout
+
+                val isLandscape =
+                    resources.configuration.orientation ==
+                            Configuration.ORIENTATION_LANDSCAPE
+
+                val cameraFallback =
+                    if (isLandscape) {
+                        dp(landscapeCameraPadding)
+                    } else {
+                        0
+                    }
+
+                val safeLeft = maxOf(
+                    bars.left + padding,
+                    (cutout?.safeInsetLeft ?: 0) + padding,
+                    cameraFallback
+                )
+
+                val safeRight = maxOf(
+                    bars.right + padding,
+                    (cutout?.safeInsetRight ?: 0) + padding,
+                    cameraFallback
+                )
+
+                val safeTop = maxOf(
+                    bars.top,
+                    cutout?.safeInsetTop ?: 0
+                ) + padding
+
+                val safeBottom = maxOf(
+                    bars.bottom,
+                    cutout?.safeInsetBottom ?: 0,
+                    ime.bottom
+                ) + padding
+
+                view.setPadding(
+                    safeLeft,
+                    safeTop,
+                    safeRight,
+                    safeBottom
+                )
+
+            } else {
+
+                view.setPadding(
+                    bars.left + padding,
+                    bars.top + padding,
+                    bars.right + padding,
+                    maxOf(bars.bottom, ime.bottom) + padding
+                )
+            }
 
             if (
                 keyboardWasVisible &&
@@ -458,6 +691,15 @@ class MainActivity : ComponentActivity() {
         return value.lowercase().filter {
             it.isLetterOrDigit()
         }
+    }
+
+    private fun commandError(message: String): String {
+        commandFailed = true
+        return message
+    }
+
+    private fun unknownCommand(command: String): String {
+        return commandError("Unknown command: $command")
     }
 
     private fun updatePrompt() {
@@ -568,15 +810,17 @@ class MainActivity : ComponentActivity() {
     ): String {
 
         if (requested.isBlank()) {
-            return if (hide) {
-                "Usage: hide <app name>"
-            } else {
-                "Usage: unhide <app name>"
-            }
+            return commandError(
+                if (hide) {
+                    "Usage: hide <app name>"
+                } else {
+                    "Usage: unhide <app name>"
+                }
+            )
         }
 
         if (normalize(requested).length < 2) {
-            return "Enter at least 2 letters."
+            return commandError("Enter at least 2 letters.")
         }
 
         val source = if (hide) {
@@ -593,11 +837,11 @@ class MainActivity : ComponentActivity() {
         }
 
         if (matches.isEmpty()) {
-            return "App not found: $requested"
+            return commandError("App not found: $requested")
         }
 
         if (matches.size > 1) {
-            return "Provide more letters."
+            return commandError("Provide more letters.")
         }
 
         val app = matches.first()
@@ -624,6 +868,10 @@ class MainActivity : ComponentActivity() {
 
         val cleaned = command.trim()
 
+        if (cleaned.isEmpty()) {
+            return ""
+        }
+
         if (cleaned == "?") {
             return executeCommand("?", "")
         }
@@ -648,7 +896,7 @@ class MainActivity : ComponentActivity() {
         val query = normalize(cleaned)
 
         if (query.length < 2) {
-            return "Enter at least 2 letters."
+            return unknownCommand(cleaned)
         }
 
         val apps = activeApps()
@@ -677,8 +925,12 @@ class MainActivity : ComponentActivity() {
         val totalMatches =
             commandMatches.size + appMatches.size
 
+        if (totalMatches == 0) {
+            return unknownCommand(cleaned)
+        }
+
         if (totalMatches > 1) {
-            return "Provide more letters."
+            return commandError("Provide more letters.")
         }
 
         if (commandMatches.size == 1) {
@@ -688,7 +940,11 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        return launchApp(cleaned)
+        if (appMatches.size == 1) {
+            return launchApp(cleaned)
+        }
+
+        return unknownCommand(cleaned)
     }
 
     private fun executeCommand(
@@ -701,7 +957,7 @@ class MainActivity : ComponentActivity() {
             command != "hide" &&
             command != "unhide"
         ) {
-            return "Usage: $command"
+            return commandError("Usage: $command")
         }
 
         return when (command) {
@@ -754,17 +1010,14 @@ class MainActivity : ComponentActivity() {
             "back" -> {
                 inHiddenFolder = false
                 returnedHome = true
-                updatePrompt()
 
-                terminalScroll?.post {
-                    terminalScroll?.scrollTo(0, 0)
-                }
+                updatePrompt()
 
                 ""
             }
 
             else -> {
-                "Unknown command: $command"
+                unknownCommand(command)
             }
         }
     }
@@ -772,7 +1025,7 @@ class MainActivity : ComponentActivity() {
     private fun launchApp(command: String): String {
 
         if (normalize(command).length < 2) {
-            return "Enter at least 2 letters."
+            return unknownCommand(command)
         }
 
         val matches = findMatches(
@@ -781,11 +1034,11 @@ class MainActivity : ComponentActivity() {
         )
 
         if (matches.isEmpty()) {
-            return "App not found: $command"
+            return unknownCommand(command)
         }
 
         if (matches.size > 1) {
-            return "Provide more letters."
+            return commandError("Provide more letters.")
         }
 
         val app = matches.first()
@@ -824,7 +1077,7 @@ class MainActivity : ComponentActivity() {
             launchingApp = false
             showKeyboard()
 
-            "Unable to launch $name."
+            commandError("Unable to launch $name.")
         }
     }
 
