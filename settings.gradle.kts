@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "smthOS"
+rootProject.name = "AcheronOS"
 include(":app")

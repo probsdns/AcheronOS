@@ -1,9 +1,9 @@
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
-// Read Git's HEAD file so Gradle detects branch switches
 val gitHeadFile = rootProject.layout.projectDirectory.file(".git/HEAD")
 
 val gitHead = providers.fileContents(gitHeadFile)
@@ -11,13 +11,10 @@ val gitHead = providers.fileContents(gitHeadFile)
     .get()
     .trim()
 
-// A normal branch has HEAD content like:
-// ref: refs/heads/v1.7-wip
 val currentBranch = gitHead
     .removePrefix("ref: refs/heads/")
     .takeIf { gitHead.startsWith("ref: refs/heads/") }
 
-// Extract the version from branches such as v1.7-wip
 val branchVersion = currentBranch?.let { branch ->
     Regex("""^v(\d+(?:\.\d+)+)(?:-wip)?$""")
         .matchEntire(branch)
@@ -25,7 +22,6 @@ val branchVersion = currentBranch?.let { branch ->
         ?.get(1)
 }
 
-// Find the latest reachable stable release tag
 val latestStableTag = try {
     providers.exec {
         workingDir = rootProject.projectDir
@@ -49,30 +45,30 @@ val latestStableTag = try {
     null
 }
 
-val smthosVersion = branchVersion ?: latestStableTag ?: "1.0"
+val acheronosVersion = branchVersion ?: latestStableTag ?: "1.0"
 
-println("smthOS Git branch: ${currentBranch ?: "unknown"}")
-println("smthOS detected version: v$smthosVersion")
+println("AcheronOS Git branch: ${currentBranch ?: "unknown"}")
+println("AcheronOS detected version: v$acheronosVersion")
 
 android {
-    namespace = "com.example.smthos"
+    namespace = "com.example.acheronos"
 
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.smthos"
+        applicationId = "com.example.acheronos"
         minSdk = 26
         targetSdk = 37
 
         versionCode = 1
-        versionName = smthosVersion
+        versionName = acheronosVersion
 
         buildConfigField(
             "String",
-            "SMTHOS_VERSION",
-            "\"v$smthosVersion\""
+            "ACHERONOS_VERSION",
+            "\"v$acheronosVersion\""
         )
 
         testInstrumentationRunner =

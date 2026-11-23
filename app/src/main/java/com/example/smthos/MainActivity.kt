@@ -1,4 +1,4 @@
-package com.example.smthos
+package com.example.acheronos
 
 import android.content.Context
 import android.content.Intent
@@ -53,10 +53,11 @@ import kotlinx.coroutines.withContext
 import kotlin.math.atan2
 import kotlin.random.Random
 
-private val SMTHOS_VERSION = BuildConfig.SMTHOS_VERSION
-private const val PREFS_NAME = "smthos_settings"
+private val ACHERONOS_VERSION = BuildConfig.ACHERONOS_VERSION
+private const val PREFS_NAME = "acheron_settings"
 private const val PREF_WALLPAPER = "wallpaper_uri"
 private const val PREF_TEXT_COLOR = "text_color"
+private const val PREF_HIDDEN_PACKAGES = "hidden_packages"
 
 private val TerminalBlack = Color.Black
 private val DefaultTextColor = Color.White
@@ -285,24 +286,24 @@ private fun resolveShortcut(
     }
 }
 
+
 private fun buildDirectory(
     context: Context,
-    apps: List<PhoneApp>
+    apps: List<PhoneApp>,
+    hiddenPackages: Set<String>
 ): AppDirectory {
-    val hiddenResolved = hiddenApps.mapNotNull { label ->
-        resolveHiddenApp(label, apps)?.let { app ->
+    val hiddenResolved = apps
+        .filter {
+            it.packageName in hiddenPackages &&
+                    it.packageName != context.packageName
+        }
+        .map {
             AppShortcut(
-                label = preferredNames[label] ?: label,
-                app = app
+                label = displayName(it),
+                app = it
             )
         }
-    }.distinctBy {
-        appKey(it.app)
-    }
-
-    val hiddenPackages = hiddenResolved
-        .map { it.app.packageName }
-        .toSet()
+        .distinctBy { appKey(it.app) }
 
     val visibleApps = apps
         .filter {
@@ -358,13 +359,12 @@ class MainActivity : ComponentActivity() {
                     onPrimary = TerminalBlack
                 )
             ) {
-                SmthOS()
+                AcheronOS()
             }
         }
     }
 }
 
-// Read EXIF orientation before decoding the image.
 private fun wallpaperMatrix(
     context: Context,
     uri: Uri
@@ -776,7 +776,7 @@ private fun TextColorPicker(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SmthOS() {
+private fun AcheronOS() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -828,8 +828,7 @@ private fun SmthOS() {
 
     val startupOutput = remember {
         listOf(
-            "Type help for all commands and their purpose :D",
-            "",
+            "Type help for all commands",
             """
                   \         /
                    \       /
@@ -887,8 +886,39 @@ private fun SmthOS() {
         mutableStateOf(installedApps(context))
     }
 
-    val directory = remember(context, apps) {
-        buildDirectory(context, apps)
+
+    val initialHiddenPackages = remember(context) {
+        if (preferences.contains(PREF_HIDDEN_PACKAGES)) {
+            preferences.getStringSet(
+                PREF_HIDDEN_PACKAGES,
+                emptySet()
+            )?.toSet() ?: emptySet()
+        } else {
+            hiddenApps.mapNotNull { label ->
+                knownPackages[label]
+                    ?: resolveHiddenApp(label, apps)?.packageName
+            }.toSet().also { defaults ->
+                preferences.edit()
+                    .putStringSet(PREF_HIDDEN_PACKAGES, defaults)
+                    .apply()
+            }
+        }
+    }
+
+    var hiddenPackages by remember {
+        mutableStateOf(initialHiddenPackages)
+    }
+
+    fun saveHiddenPackages(updated: Set<String>) {
+        hiddenPackages = updated.toSet()
+
+        preferences.edit()
+            .putStringSet(PREF_HIDDEN_PACKAGES, updated.toSet())
+            .apply()
+    }
+
+    val directory = remember(context, apps, hiddenPackages) {
+        buildDirectory(context, apps, hiddenPackages)
     }
 
     DisposableEffect(lifecycleOwner, context) {
@@ -974,16 +1004,243 @@ private fun SmthOS() {
 
         input = ""
         val lower = command.lowercase()
+        val query = normalize(command)
 
-        if (
-            lower == "back" ||
-            lower == "/" ||
-            lower == "clear"
+        val managementAction = lower.substringBefore(" ")
+        val managementLocation =
+            if (inHiddenFolder) "?" else "home"
+
+        if (managementAction == "hide" ||
+            managementAction == "unhide"
         ) {
-            if (lower != "clear") {
-                inHiddenFolder = false
+            val requested = command
+                .substringAfter(" ", "")
+                .trim()
+
+            printLine("$managementLocation > $command")
+
+            if (requested.isEmpty()) {
+                printLine(
+                    "Usage: $managementAction <app name>"
+                )
+                return
             }
 
+            val source = if (managementAction == "hide") {
+                directory.visible
+            } else {
+                directory.hidden
+            }
+
+            val candidates = source.values
+                .distinctBy { it.app.packageName }
+
+            val requestedKey = normalize(requested)
+
+            val exactMatches = candidates.filter {
+                normalize(it.label) == requestedKey
+            }
+
+            val matches = if (exactMatches.isNotEmpty()) {
+                exactMatches
+            } else if (requestedKey.length >= 2) {
+                candidates.filter {
+                    normalize(it.label).startsWith(requestedKey)
+                }
+            } else {
+                emptyList()
+            }
+
+            when {
+                matches.size > 1 -> {
+                    printLine(
+                        "Ambiguous app. Matches: " +
+                                matches.joinToString(", ") {
+                                    it.label
+                                }
+                    )
+                }
+
+                matches.size == 1 -> {
+                    val shortcut = matches.first()
+                    val packageName =
+                        shortcut.app.packageName
+
+                    if (managementAction == "hide") {
+                        saveHiddenPackages(
+                            hiddenPackages + packageName
+                        )
+
+                        printLine(
+                            "${shortcut.label} moved to ?"
+                        )
+                    } else {
+                        saveHiddenPackages(
+                            hiddenPackages - packageName
+                        )
+
+                        printLine(
+                            "${shortcut.label} moved to home"
+                        )
+                    }
+                }
+
+                else -> {
+                    printLine(
+                        "App not found: $requested"
+                    )
+                }
+            }
+
+            return
+        }
+
+        val commands = listOf(
+            "back",
+            "clear",
+            "help",
+            "aliases",
+            "apps",
+            "refresh",
+            "setwall",
+            "resetwall",
+            "textcol",
+            "resetcol",
+            "notifications",
+            "control"
+        )
+
+        if (lower == "/" || lower == "back") {
+            inHiddenFolder = false
+            output = startupOutput
+            return
+        }
+
+        if (lower == "clear") {
+            output = startupOutput
+            return
+        }
+
+        if (lower == "?") {
+            printLine("? > ?")
+            openHiddenFolder()
+            return
+        }
+
+        // Preserve the existing explicit app-opening command.
+        if (lower.startsWith("open ")) {
+            val requested = command.substring(5).trim()
+
+            val shortcut = resolveShortcut(
+                requested,
+                activeAliases()
+            )
+
+            val location = if (inHiddenFolder) "?" else "home"
+            printLine("$location > $command")
+
+            if (shortcut != null) {
+                launchApp(shortcut)
+            } else {
+                printLine("App not found: $requested")
+            }
+            return
+        }
+
+        val aliases = activeAliases()
+
+        val availableApps = aliases.values
+            .distinctBy { appKey(it.app) }
+
+        val exactCommand = commands.firstOrNull {
+            normalize(it) == query
+        }
+
+        // Find commands sharing the entered prefix.
+        val matchingCommands = if (query.length >= 2) {
+            commands.filter {
+                normalize(it).startsWith(query)
+            }
+        } else {
+            emptyList()
+        }
+
+        // Find apps sharing the same prefix.
+        val matchingApps = if (query.length >= 2) {
+            availableApps.filter {
+                normalize(it.label).startsWith(query)
+            }
+        } else {
+            emptyList()
+        }
+
+        // Full app names and generated aliases still work.
+        val exactApp = availableApps.firstOrNull {
+            normalize(it.label) == query
+        } ?: aliases[query]
+
+        val selectedCommand: String?
+        val selectedApp: AppShortcut?
+
+        when {
+            // Full command names take priority.
+            exactCommand != null -> {
+                selectedCommand = exactCommand
+                selectedApp = null
+            }
+
+            // Full app names or generated aliases work.
+            exactApp != null -> {
+                selectedCommand = null
+                selectedApp = exactApp
+            }
+
+            query.length < 2 -> {
+                printLine("Enter at least 2 letters.")
+                return
+            }
+
+            // Don't guess when a prefix matches multiple things.
+            matchingCommands.size + matchingApps.size > 1 -> {
+                val matches = (
+                        matchingCommands +
+                                matchingApps.map { it.label }
+                        ).distinct().sorted()
+
+                val location = if (inHiddenFolder) "?" else "home"
+                printLine("$location > $command")
+                printLine(
+                    "Ambiguous command. Matches: " +
+                            matches.joinToString(", ")
+                )
+                return
+            }
+
+            matchingCommands.size == 1 -> {
+                selectedCommand = matchingCommands.first()
+                selectedApp = null
+            }
+
+            matchingApps.size == 1 -> {
+                selectedCommand = null
+                selectedApp = matchingApps.first()
+            }
+
+            else -> {
+                val location = if (inHiddenFolder) "?" else "home"
+                printLine("$location > $command")
+                printLine("Unknown command: $command")
+                return
+            }
+        }
+
+        if (selectedCommand == "back") {
+            inHiddenFolder = false
+            output = startupOutput
+            return
+        }
+
+        if (selectedCommand == "clear") {
             output = startupOutput
             return
         }
@@ -991,40 +1248,45 @@ private fun SmthOS() {
         val location = if (inHiddenFolder) "?" else "home"
         printLine("$location > $command")
 
-        when {
-            lower == "help" -> {
+        if (selectedApp != null) {
+            launchApp(selectedApp)
+            return
+        }
+
+        when (selectedCommand) {
+            "help" -> {
                 printLine(
                     """
-                    QUICK LAUNCH
-                    ab       - Launch app with 2+ letters
-                    aliases  - Show app shortcuts
-                    apps     - List detected apps
-                    refresh  - Rescan installed apps
+                QUICK LAUNCH
+                ab       - Launch app with 2+ letters
+                aliases  - Show app shortcuts
+                apps     - List detected apps
+                refresh  - Rescan installed apps
 
-                    CUSTOMISATION
-                    setwall  - Choose wallpaper
-                    resetwall - Remove wallpaper
-                    textcol  - Choose text colour
-                    resetcol - Reset text colour
+                COMMAND SHORTCUTS
+                Type 2+ letters of any command.
+                More letters are needed if names conflict.
+                Commands and apps share prefixes.
 
-                    HIDDEN FOLDER
-                    ?        - Open hidden apps
-                    back     - Return home and clear
+                CUSTOMISATION
+                setwall  - Choose wallpaper
+                resetwall - Remove wallpaper
+                textcol  - Choose text colour
+                resetcol - Reset text colour
 
-                    SYSTEM
-                    notifications - Notification help
-                    control       - Android Settings
-                    clear         - Clear terminal
-                    help          - Command list
-                    """.trimIndent()
+                NAVIGATION
+                back     - Return home and clear
+
+                SYSTEM
+                notifications - Notification help
+                control       - Android Settings
+                clear         - Clear terminal
+                help          - Command list
+                """.trimIndent()
                 )
             }
 
-            lower == "?" -> {
-                openHiddenFolder()
-            }
-
-            lower == "aliases" -> {
+            "aliases" -> {
                 val lines = activeAliases()
                     .toSortedMap()
                     .entries
@@ -1037,7 +1299,7 @@ private fun SmthOS() {
                 )
             }
 
-            lower == "apps" -> {
+            "apps" -> {
                 val lines = activeAliases()
                     .values
                     .map { it.label }
@@ -1050,10 +1312,10 @@ private fun SmthOS() {
                 )
             }
 
-            lower == "refresh" -> {
+            "refresh" -> {
                 apps = installedApps(context)
 
-                val refreshed = buildDirectory(context, apps)
+                val refreshed = buildDirectory(context, apps, hiddenPackages)
 
                 printLine(
                     "App detection refreshed: " +
@@ -1062,11 +1324,11 @@ private fun SmthOS() {
                 )
             }
 
-            lower == "setwall" -> {
+            "setwall" -> {
                 wallpaperPicker.launch(arrayOf("image/*"))
             }
 
-            lower == "resetwall" -> {
+            "resetwall" -> {
                 wallpaperUri = null
 
                 preferences.edit()
@@ -1076,11 +1338,11 @@ private fun SmthOS() {
                 printLine("Wallpaper reset to black.")
             }
 
-            lower == "textcol" -> {
+            "textcol" -> {
                 showColorPicker = true
             }
 
-            lower == "resetcol" -> {
+            "resetcol" -> {
                 textColor = DefaultTextColor
 
                 preferences.edit()
@@ -1093,7 +1355,7 @@ private fun SmthOS() {
                 printLine("Text colour reset to white.")
             }
 
-            lower == "notifications" -> {
+            "notifications" -> {
                 printLine(
                     "Swipe down from the top to view notifications."
                 )
@@ -1103,7 +1365,7 @@ private fun SmthOS() {
                 )
             }
 
-            lower == "control" -> {
+            "control" -> {
                 try {
                     context.startActivity(
                         Intent(Settings.ACTION_SETTINGS)
@@ -1112,36 +1374,6 @@ private fun SmthOS() {
                     printLine("Opening Android Settings...")
                 } catch (_: Exception) {
                     printLine("Unable to open Settings.")
-                }
-            }
-
-            lower.startsWith("open ") -> {
-                val requested = command
-                    .substring(5)
-                    .trim()
-
-                val shortcut = resolveShortcut(
-                    requested,
-                    activeAliases()
-                )
-
-                if (shortcut != null) {
-                    launchApp(shortcut)
-                } else {
-                    printLine("App not found: $requested")
-                }
-            }
-
-            else -> {
-                val shortcut = resolveShortcut(
-                    command,
-                    activeAliases()
-                )
-
-                if (shortcut != null) {
-                    launchApp(shortcut)
-                } else {
-                    printLine("Unknown command: $command")
                 }
             }
         }
@@ -1176,15 +1408,19 @@ private fun SmthOS() {
                 .imePadding()
                 .padding(20.dp)
         ) {
+
+
             Text(
-                text = "smthOS",
+                text = "AcheronOS",
                 color = textColor,
-                style = MaterialTheme.typography.headlineMedium,
+                fontSize = 25.sp,
                 fontFamily = FontFamily.Monospace
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
             Text(
-                text = "Terminal Launcher · $SMTHOS_VERSION | Developed by probsdns",
+                text = "All in one suite & app launcher | $ACHERONOS_VERSION",
                 color = textColor,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
@@ -1234,7 +1470,7 @@ private fun SmthOS() {
 
                 placeholder = {
                     Text(
-                        "Enter command...",
+                        " Enter command",
                         color = textColor.copy(alpha = 0.8f)
                     )
                 },
