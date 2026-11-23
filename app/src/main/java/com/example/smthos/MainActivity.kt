@@ -997,7 +997,7 @@ private fun AcheronOS() {
             lines.ifEmpty { "No hidden apps detected." }
         )
     }
-    
+
     fun runCommand() {
         val command = input.trim()
         if (command.isEmpty()) return
@@ -1420,7 +1420,7 @@ private fun AcheronOS() {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "App launcher | $ACHERONOS_VERSION | Developed by probsdns",
+                text = "All in one suite & app launcher | $ACHERONOS_VERSION",
                 color = textColor,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
