@@ -1,4 +1,3 @@
-
 package com.example.acheronos
 
 import android.app.ActivityManager
@@ -113,6 +112,24 @@ class MainActivity : ComponentActivity() {
                 ).toInt()
     }
 
+    private fun scrollToBottom() {
+        val scroll = terminalScroll ?: return
+
+        scroll.post {
+            val content = scroll.getChildAt(0)
+
+            if (content != null) {
+                val bottom = (
+                        content.bottom -
+                                scroll.height +
+                                scroll.paddingBottom
+                        ).coerceAtLeast(0)
+
+                scroll.scrollTo(0, bottom)
+            }
+        }
+    }
+
     private fun showKeyboard() {
         val input = terminalInput ?: return
 
@@ -219,8 +236,10 @@ class MainActivity : ComponentActivity() {
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.BLACK)
+
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
+
             isFillViewport = true
             overScrollMode = ScrollView.OVER_SCROLL_NEVER
 
@@ -242,6 +261,8 @@ class MainActivity : ComponentActivity() {
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP or Gravity.START
+
             setBackgroundColor(Color.BLACK)
 
             layoutParams = FrameLayout.LayoutParams(
@@ -252,17 +273,40 @@ class MainActivity : ComponentActivity() {
 
         val stats = TextView(this).apply {
             text = getCoverStats()
+
             setTextColor(Color.WHITE)
             typeface = Typeface.MONOSPACE
             textSize = 15f
+
             gravity = Gravity.TOP or Gravity.START
+
             setPadding(0, 0, 0, 0)
         }
 
-        // Vertically expanding command area.
+        // Previous commands and their outputs.
+        val output = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            textSize = 15f
+
+            includeFontPadding = false
+
+            setPadding(0, 0, 0, 0)
+
+            visibility = android.view.View.GONE
+
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        // Active prompt always appears below the output.
         val promptRow = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP or Gravity.START
+
+            isBaselineAligned = false
 
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -271,14 +315,20 @@ class MainActivity : ComponentActivity() {
         }
 
         val prompt = TextView(this).apply {
-            text = "[Ranveer@ZFold8U ~] \$ "
+            text = ">>>"
+
             setTextColor(Color.WHITE)
             typeface = Typeface.MONOSPACE
             textSize = 15f
+
+            gravity = Gravity.TOP or Gravity.START
+
+            includeFontPadding = false
+
             setPadding(0, 0, 0, 0)
 
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
@@ -293,7 +343,6 @@ class MainActivity : ComponentActivity() {
                     InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                     InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
 
-            // Wrap instead of scrolling horizontally.
             setHorizontallyScrolling(false)
 
             minLines = 1
@@ -305,7 +354,10 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.MONOSPACE
             textSize = 15f
 
+            includeFontPadding = false
+
             this.background = null
+
             setPadding(0, 0, 0, 0)
 
             isVerticalScrollBarEnabled = false
@@ -315,8 +367,9 @@ class MainActivity : ComponentActivity() {
                     EditorInfo.IME_FLAG_NO_EXTRACT_UI
 
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
             )
 
             if (Build.VERSION.SDK_INT >= 29) {
@@ -326,24 +379,17 @@ class MainActivity : ComponentActivity() {
 
         terminalInput = commandInput
 
-        val output = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            typeface = Typeface.MONOSPACE
-            textSize = 15f
-            setPadding(0, 0, 0, 0)
-
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-
         promptRow.addView(prompt)
         promptRow.addView(commandInput)
 
+        // Terminal order:
+        // 1. Startup information
+        // 2. Command history
+        // 3. Active command prompt
+
         content.addView(stats)
-        content.addView(promptRow)
         content.addView(output)
+        content.addView(promptRow)
 
         scroll.addView(content)
         screenLayout.addView(scroll)
@@ -362,6 +408,7 @@ class MainActivity : ComponentActivity() {
 
             val mascot = TextView(this).apply {
                 text = androidMascot
+
                 setTextColor(Color.WHITE)
                 typeface = Typeface.MONOSPACE
 
@@ -369,6 +416,7 @@ class MainActivity : ComponentActivity() {
                 textScaleX = 0.8f
 
                 includeFontPadding = false
+
                 gravity = Gravity.TOP or Gravity.START
 
                 setPadding(0, 0, 0, 0)
@@ -402,9 +450,23 @@ class MainActivity : ComponentActivity() {
         prompt.setOnClickListener {
             commandInput.requestFocus()
             showKeyboard()
+            scrollToBottom()
         }
 
-        // Keep the active input visible as it grows.
+        // Scroll down whenever the terminal content grows.
+        content.addOnLayoutChangeListener {
+                _, _, top, _, bottom,
+                _, oldTop, _, oldBottom ->
+
+            val newHeight = bottom - top
+            val oldHeight = oldBottom - oldTop
+
+            if (newHeight != oldHeight) {
+                scrollToBottom()
+            }
+        }
+
+        // Keep wrapped commands visible.
         commandInput.addOnLayoutChangeListener {
                 _, _, top, _, bottom,
                 _, oldTop, _, oldBottom ->
@@ -413,37 +475,33 @@ class MainActivity : ComponentActivity() {
             val oldHeight = oldBottom - oldTop
 
             if (
-                newHeight > oldHeight &&
+                newHeight != oldHeight &&
                 commandInput.hasFocus()
             ) {
-                commandInput.post {
-                    val cursorOffset =
-                        commandInput.selectionEnd.coerceAtLeast(0)
-
-                    val textLayout = commandInput.layout
-
-                    if (textLayout != null) {
-                        val line = textLayout.getLineForOffset(
-                            cursorOffset
-                        )
-
-                        val cursorRect = android.graphics.Rect(
-                            0,
-                            textLayout.getLineTop(line),
-                            commandInput.width,
-                            textLayout.getLineBottom(line)
-                        )
-
-                        commandInput.requestRectangleOnScreen(
-                            cursorRect,
-                            false
-                        )
-                    }
-                }
+                scrollToBottom()
             }
         }
 
-        // Shared submission function for keyboard actions.
+        // Add a command and its result to the history.
+        fun appendHistory(
+            command: String,
+            result: String
+        ) {
+            output.visibility = android.view.View.VISIBLE
+
+            if (output.text.isNotEmpty()) {
+                output.append("\n")
+            }
+
+            output.append(">>>$command\n")
+
+            if (result.isNotEmpty()) {
+                output.append(result)
+                output.append("\n")
+            }
+        }
+
+        // Execute the command and move the prompt down.
         fun submitCommand() {
 
             val command = commandInput.text
@@ -458,51 +516,36 @@ class MainActivity : ComponentActivity() {
 
                 val result = runCommand(command)
 
-                when {
-                    returnedHome -> {
-                        output.text = ""
-
-                        scroll.post {
-                            scroll.scrollTo(0, 0)
-                        }
-                    }
-
-                    commandFailed -> {
-                        if (output.text.isNotEmpty()) {
-                            output.append("\n")
-                        }
-
-                        output.append(result)
-
-                        scroll.post {
-                            scroll.smoothScrollTo(
-                                0,
-                                promptRow.top
-                            )
-                        }
-                    }
-
-                    result.isNotEmpty() -> {
-                        output.text = result
-
-                        scroll.post {
-                            scroll.smoothScrollTo(
-                                0,
-                                promptRow.top
-                            )
-                        }
-                    }
-                }
-
                 commandInput.text.clear()
+
+                if (returnedHome) {
+
+                    // Clear all command history.
+                    output.text = ""
+                    output.visibility = android.view.View.GONE
+
+                    scroll.post {
+                        scroll.scrollTo(0, 0)
+                    }
+
+                } else {
+
+                    // Preserve previous commands and results.
+                    appendHistory(
+                        command,
+                        result
+                    )
+
+                    scrollToBottom()
+                }
             }
 
             if (!launchingApp) {
+                commandInput.requestFocus()
                 showKeyboard()
             }
         }
 
-        // Enter submits rather than inserting a newline.
         commandInput.setOnEditorActionListener {
                 _, actionId, event ->
 
@@ -532,8 +575,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Handle keyboards that insert a newline instead
-        // of sending an editor action.
         var handlingNewline = false
 
         commandInput.addTextChangedListener(
@@ -676,14 +717,38 @@ class MainActivity : ComponentActivity() {
                 showKeyboard()
             }
 
+            if (keyboardVisible && !keyboardWasVisible) {
+                scrollToBottom()
+            }
+
             keyboardWasVisible = keyboardVisible
 
             insets
         }
 
+        // Keep the prompt visible when the keyboard
+        // changes the available terminal height.
+        scroll.addOnLayoutChangeListener {
+                _, _, top, _, bottom,
+                _, oldTop, _, oldBottom ->
+
+            val newHeight = bottom - top
+            val oldHeight = oldBottom - oldTop
+
+            if (
+                newHeight != oldHeight &&
+                commandInput.hasFocus()
+            ) {
+                scrollToBottom()
+            }
+        }
+
         setContentView(root)
+
         commandInput.requestFocus()
+
         ViewCompat.requestApplyInsets(root)
+
         showKeyboard()
     }
 
@@ -703,10 +768,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updatePrompt() {
-        val location = if (inHiddenFolder) "?" else "~"
-
-        terminalPrompt?.text =
-            "[Ranveer@ZFold8U $location] \$ "
+        terminalPrompt?.text = ">>>"
     }
 
     private fun saveHiddenPackages() {
