@@ -1343,7 +1343,22 @@ class MainActivity : ComponentActivity() {
         val temperature = getSystemTemperature()
         val appCount = getInstalledAppCount()
 
+        val storage = android.os.StatFs(
+            android.os.Environment.getDataDirectory().path
+        )
+
+        val totalStorage = storage.totalBytes / 1000000000.0
+        val usedStorage = (
+            storage.totalBytes - storage.availableBytes
+        ) / 1000000000.0
+
         return "AcheronOS\n" +
+                (if (minOf(
+                    resources.configuration.screenWidthDp,
+                    resources.configuration.screenHeightDp
+                ) < 600)
+                    "Unfold phone to access full AcheronOS suite\n"
+                else "") +
                 "Type help for all commands\n" +
                 "Device: $deviceName\n" +
                 "Model: $deviceModel\n" +
@@ -1359,6 +1374,7 @@ class MainActivity : ComponentActivity() {
                 "CPU: $cpu (${Runtime.getRuntime().availableProcessors()} cores)\n" +
                 "GPU: ${getGpuName()}\n" +
                 "Memory: ${"%.1f".format(usedRam)}GB/${"%.1f".format(totalRam)}GB\n" +
+                "Storage: ${"%.0f".format(usedStorage)}GB/${"%.0f".format(totalStorage)}GB\n" +
                 "Battery temp: $temperature\n" +
                 "Installed apps: $appCount"
     }
