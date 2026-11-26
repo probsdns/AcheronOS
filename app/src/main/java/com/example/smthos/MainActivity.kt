@@ -483,18 +483,27 @@ class MainActivity : ComponentActivity() {
             command: String,
             result: String
         ) {
+            val entry = buildString {
+                append(">>>")
+                append(command)
+
+                result.lineSequence()
+                    .filter { it.isNotBlank() }
+                    .forEach { line ->
+                        append('\n')
+                        append(line)
+                    }
+            }
+
+            val previous = output.text.toString().trimEnd()
+
+            output.text = if (previous.isEmpty()) {
+                entry
+            } else {
+                "$previous\n$entry"
+            }
+
             output.visibility = android.view.View.VISIBLE
-
-            if (output.text.isNotEmpty()) {
-                output.append("\n")
-            }
-
-            output.append(">>>$command\n")
-
-            if (result.isNotEmpty()) {
-                output.append(result)
-                output.append("\n")
-            }
         }
 
         fun submitCommand() {
