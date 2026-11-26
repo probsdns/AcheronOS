@@ -8,6 +8,7 @@ import android.content.pm.ResolveInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
     private var terminalInput: EditText? = null
     private var terminalPrompt: TextView? = null
     private var terminalScroll: ScrollView? = null
+    private var terminalStats: TextView? = null
 
     private var isResumed = false
     private var launchingApp = false
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity() {
         "apps",
         "hide",
         "unhide",
+        "delete",
         "back"
     )
 
@@ -90,6 +93,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         isResumed = true
         launchingApp = false
+        terminalStats?.text = getCoverStats()
         showKeyboard()
     }
 
@@ -283,7 +287,8 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 0, 0, 0)
         }
 
-        // Previous commands and their outputs.
+        terminalStats = stats
+
         val output = TextView(this).apply {
             setTextColor(Color.WHITE)
             typeface = Typeface.MONOSPACE
@@ -301,7 +306,6 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        // Active prompt always appears below the output.
         val promptRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP or Gravity.START
@@ -382,11 +386,6 @@ class MainActivity : ComponentActivity() {
         promptRow.addView(prompt)
         promptRow.addView(commandInput)
 
-        // Terminal order:
-        // 1. Startup information
-        // 2. Command history
-        // 3. Active command prompt
-
         content.addView(stats)
         content.addView(output)
         content.addView(promptRow)
@@ -453,7 +452,6 @@ class MainActivity : ComponentActivity() {
             scrollToBottom()
         }
 
-        // Scroll down whenever the terminal content grows.
         content.addOnLayoutChangeListener {
                 _, _, top, _, bottom,
                 _, oldTop, _, oldBottom ->
@@ -466,7 +464,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Keep wrapped commands visible.
         commandInput.addOnLayoutChangeListener {
                 _, _, top, _, bottom,
                 _, oldTop, _, oldBottom ->
@@ -482,7 +479,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Add a command and its result to the history.
         fun appendHistory(
             command: String,
             result: String
@@ -501,7 +497,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Execute the command and move the prompt down.
         fun submitCommand() {
 
             val command = commandInput.text
@@ -520,7 +515,6 @@ class MainActivity : ComponentActivity() {
 
                 if (returnedHome) {
 
-                    // Clear all command history.
                     output.text = ""
                     output.visibility = android.view.View.GONE
 
@@ -530,7 +524,6 @@ class MainActivity : ComponentActivity() {
 
                 } else {
 
-                    // Preserve previous commands and results.
                     appendHistory(
                         command,
                         result
@@ -726,8 +719,6 @@ class MainActivity : ComponentActivity() {
             insets
         }
 
-        // Keep the prompt visible when the keyboard
-        // changes the available terminal height.
         scroll.addOnLayoutChangeListener {
                 _, _, top, _, bottom,
                 _, oldTop, _, oldBottom ->
@@ -926,6 +917,71 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Request Android's native uninstall confirmation.
+    private fun deleteApp(requested: String): String {
+
+        if (requested.isBlank()) {
+            return commandError("Usage: delete <app name>")
+        }
+
+        if (normalize(requested).length < 2) {
+            return commandError("Enter at least 2 letters.")
+        }
+
+        val matches = findMatches(
+            requested,
+            activeApps()
+        ).distinctBy {
+            it.activityInfo.packageName
+        }
+
+        if (matches.isEmpty()) {
+            return commandError("App not found: $requested")
+        }
+
+        if (matches.size > 1) {
+            return commandError("Provide more letters.")
+        }
+
+        val app = matches.first()
+        val name = appName(app)
+        val appPackage = app.activityInfo.packageName
+
+        return try {
+
+            val intent = Intent(
+                Intent.ACTION_DELETE,
+                Uri.fromParts(
+                    "package",
+                    appPackage,
+                    null
+                )
+            )
+
+            launchingApp = true
+
+            val keyboard = getSystemService(
+                Context.INPUT_METHOD_SERVICE
+            ) as InputMethodManager
+
+            keyboard.hideSoftInputFromWindow(
+                window.decorView.windowToken,
+                0
+            )
+
+            startActivity(intent)
+
+            "Uninstall requested: $name"
+
+        } catch (_: Exception) {
+
+            launchingApp = false
+            showKeyboard()
+
+            commandError("Unable to uninstall $name.")
+        }
+    }
+
     private fun runCommand(command: String): String {
 
         val cleaned = command.trim()
@@ -955,6 +1011,14 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        // Explicit shortcut for delete.
+        if (firstWord == "del") {
+            return executeCommand(
+                "delete",
+                argument
+            )
+        }
+
         val query = normalize(cleaned)
 
         if (query.length < 2) {
@@ -972,7 +1036,8 @@ class MainActivity : ComponentActivity() {
                             (
                                     argument.isEmpty() ||
                                             candidate == "hide" ||
-                                            candidate == "unhide"
+                                            candidate == "unhide" ||
+                                            candidate == "delete"
                                     )
                 }
 
@@ -1017,7 +1082,8 @@ class MainActivity : ComponentActivity() {
         if (
             argument.isNotEmpty() &&
             command != "hide" &&
-            command != "unhide"
+            command != "unhide" &&
+            command != "delete"
         ) {
             return commandError("Usage: $command")
         }
@@ -1032,6 +1098,7 @@ class MainActivity : ComponentActivity() {
                 ? - Open ? folder
                 hide <app> - Move app to ?
                 unhide <app> - Move app to home
+                delete <app> - Uninstall app
                 back - Return home and clear output
                 <app name> - Launch an app
 
@@ -1054,6 +1121,10 @@ class MainActivity : ComponentActivity() {
 
             "unhide" -> {
                 moveApp(argument, false)
+            }
+
+            "delete" -> {
+                deleteApp(argument)
             }
 
             "?" -> {
