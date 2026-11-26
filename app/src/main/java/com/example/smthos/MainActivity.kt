@@ -825,6 +825,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun launchableApps(): List<ResolveInfo> {
+        return if (inHiddenFolder) {
+            installedApps()
+        } else {
+            visibleApps()
+        }
+    }
+
     private fun findMatches(
         command: String,
         apps: List<ResolveInfo>
@@ -1034,7 +1042,7 @@ class MainActivity : ComponentActivity() {
             return unknownCommand(cleaned)
         }
 
-        val apps = activeApps()
+        val apps = launchableApps()
 
         val commandMatches =
             if (firstWord.length >= 2) {
@@ -1172,7 +1180,7 @@ class MainActivity : ComponentActivity() {
 
         val matches = findMatches(
             command,
-            activeApps()
+            launchableApps()
         )
 
         if (matches.isEmpty()) {
