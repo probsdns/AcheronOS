@@ -13,3 +13,6 @@ Hidden command "?" gives you access so a set of prehidden apps that u can change
 Only tested on the Z Fold 8 Ultra so its not guranteed that its gonna work on other phones.
 
 The only way to install it rn is really complicated but im gonna release an apk in update v2.0 with instructions cuz installation still wont be as simple as downloading it into your phone so uh ye.
+
+System requirements
+-Default keyboard should be GBoard (Can be installed from Google Play Store)
