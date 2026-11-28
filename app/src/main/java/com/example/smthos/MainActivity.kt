@@ -1301,7 +1301,47 @@ class MainActivity : ComponentActivity() {
             .size
     }
 
-    private fun getCoverStats(): String {
+    private fun getCoverStats(): CharSequence {
+        val raw = getCoverStatsText()
+        val styled = android.text.SpannableString(raw)
+
+        val boldLines = listOf(
+            "Type help for all commands",
+            "Long press the power button or call out for Iris to talk to him"
+        )
+
+        for (line in boldLines) {
+            val start = raw.indexOf(line)
+
+            if (start >= 0) {
+                styled.setSpan(
+                    object : android.text.style.CharacterStyle(),
+                        android.text.style.UpdateAppearance {
+
+                        override fun updateDrawState(
+                            tp: android.text.TextPaint
+                        ) {
+                            tp.typeface = android.graphics.Typeface.create(
+                                android.graphics.Typeface.MONOSPACE,
+                                900,
+                                false
+                            )
+                            tp.isFakeBoldText = true
+                            tp.style = android.graphics.Paint.Style.FILL_AND_STROKE
+                            tp.strokeWidth = 1.0f
+                        }
+                    },
+                    start,
+                    start + line.length,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+        }
+
+        return styled
+    }
+
+    private fun getCoverStatsText(): String {
 
         val activityManager =
             getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -1340,8 +1380,6 @@ class MainActivity : ComponentActivity() {
 
         val deviceName = getDeviceName()
         val deviceModel = Build.MODEL
-        val temperature = getSystemTemperature()
-        val appCount = getInstalledAppCount()
 
         val storage = android.os.StatFs(
             android.os.Environment.getDataDirectory().path
@@ -1360,6 +1398,7 @@ class MainActivity : ComponentActivity() {
                     "Unfold phone to access full AcheronOS suite\n"
                 else "") +
                 "Type help for all commands\n" +
+                "Long press the power button or call out for Iris to talk to him\n" +
                 "Device: $deviceName\n" +
                 "Model: $deviceModel\n" +
                 "OS: Android ${Build.VERSION.RELEASE}\n" +
@@ -1374,9 +1413,7 @@ class MainActivity : ComponentActivity() {
                 "CPU: $cpu (${Runtime.getRuntime().availableProcessors()} cores)\n" +
                 "GPU: ${getGpuName()}\n" +
                 "Memory: ${"%.1f".format(usedRam)}GB/${"%.1f".format(totalRam)}GB\n" +
-                "Storage: ${"%.0f".format(usedStorage)}GB/${"%.0f".format(totalStorage)}GB\n" +
-                "Battery temp: $temperature\n" +
-                "Installed apps: $appCount"
+                "Storage: ${"%.0f".format(usedStorage)}GB/${"%.0f".format(totalStorage)}GB"
     }
 
     private fun getGpuName(): String {
