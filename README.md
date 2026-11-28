@@ -1,6 +1,6 @@
 AcheronOS
 
-AcheronOS is a cybersecurity suite built for android with tools inspired by kali linux and a terminal style interface which transforms your phone into a mini cyberdeck of some sort.
+Terminal suite that runs on android with built in tech tools and works with custom commands and a button based graphical interface. Includes an AI that uses the same backend as ChatGPT and can do ANYTHING in your phone all u gotta do is talk to him.
 
 Iris can help you do ANYTHING because it uses the same api as chatgpt, it can check notifications write emails tell you the time and way more, it can casually talk to you and act like an actual human, if jarvis was in a phone would be a good way to descibe him.
 
@@ -10,7 +10,7 @@ Command "Help" gives you a list of all the available commands and what they do.
 
 Hidden command "?" gives you access so a set of prehidden apps that u can change using commands unhide and hide, for info on how to use them just type help.
 
-Only tested on the Z Fold 8 Ultra so its not guranteed that its gonna work on other phones.
+Only tested on the Z Fold 8 Ultra so its not guaranteed that its gonna work on other phones.
 
 The only way to install it rn is really complicated but im gonna release an apk in update v2.0 with instructions cuz installation still wont be as simple as downloading it into your phone so uh ye.
 
