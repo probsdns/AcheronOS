@@ -29,7 +29,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
-class MainActivity : ComponentActivity() {
+class Homescreen : ComponentActivity() {
 
     private var terminalInput: EditText? = null
     private var terminalPrompt: TextView? = null
@@ -428,7 +428,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            centrePanel.addView(mascot)
 
             val rightPanel = FrameLayout(this).apply {
                 setBackgroundColor(Color.BLACK)
@@ -441,6 +440,7 @@ class MainActivity : ComponentActivity() {
             }
 
             screenLayout.addView(centrePanel)
+            rightPanel.addView(mascot)
             screenLayout.addView(rightPanel)
         }
 
